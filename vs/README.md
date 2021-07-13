@@ -10,7 +10,7 @@ CodeStream is a developer collaboration platform that integrates all of your ess
 
 ### Requirements
 
-- CodeStream requires Visual Studio 2017 or later, and is also available for [JetBrains](https://plugins.jetbrains.com/plugin/12206-codestream), [VS Code](https://marketplace.visualstudio.com/items?itemName=CodeStream.codestream) or [Atom](https://atom.io/packages/codestream).
+- CodeStream requires Visual Studio 2017 or later, and is also available for [JetBrains](https://plugins.jetbrains.com/plugin/12206-codestream) or [VS Code](https://marketplace.visualstudio.com/items?itemName=CodeStream.codestream).
 - Your repository must be managed by Git, or a Git hosting service like GitHub.
 
 # Create and Review GitHub and GitLab Pull Requests in Visual Studio
@@ -49,7 +49,7 @@ Previously discussed questions and issues that explain important decisions are n
 
 #### Where are messages stored?
 
-Your team’s codemarks, which include the message text and the code snippet, are stored in the cloud on CodeStream’s servers. CodeStream uses best practices when it comes to [security](https://www.codestream.com/security), but if your team has stringent infosec requirements we also offer an [on-prem solution](https://docs.codestream.com/onprem/).
+Your team’s codemarks, which include the message text and the code snippet, are stored in the cloud on CodeStream’s servers. CodeStream uses best practices when it comes to [security](https://www.codestream.com/security).
 
 # Help & Feedback
 

@@ -447,7 +447,7 @@ export const IssueList = React.memo((props: React.PropsWithChildren<IssueListPro
 	const [testCards, setTestCards] = React.useState<any[] | undefined>(undefined);
 	const [loadingTest, setLoadingTest] = React.useState(false);
 	const [startWorkCard, setStartWorkCard] = React.useState<any>(undefined);
-	const [validQueries, setValidQueries] = React.useState(
+	const [validGHQueries, setvalidGHQueries] = React.useState(
 		new Set([
 			"user",
 			"org",
@@ -464,7 +464,22 @@ export const IssueList = React.memo((props: React.PropsWithChildren<IssueListPro
 			"project"
 		])
 	);
+	const [validGLQueries, setvalidGLQueries] = React.useState(
+		new Set([
+			"project_id",
+			"group_id",
+			"assignee_username",
+			"assignee_id",
+			"author_username",
+			"iids",
+			"iteration_id",
+			"created_by_me",
+			"my_reaction_emoji",
+			"assigned_to_me"
+		])
+	);
 	const [validQuery, setValidQuery] = React.useState(true);
+	const [errorQuery, setErrorQuery] = React.useState(false);
 
 	const getFilterLists = (providerId: string) => {
 		const prefs = derivedState.startWorkPreferences[providerId] || {};
@@ -609,7 +624,7 @@ export const IssueList = React.memo((props: React.PropsWithChildren<IssueListPro
 		},
 		[loadedBoards, loadedCards]
 	);
-	
+
 	const escapeRegExp = (str: string) => str?.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); // $& means the whole matched string
 	const queryRegexp = React.useMemo(() => new RegExp(escapeRegExp(query), "gi"), [query]);
 
@@ -893,21 +908,38 @@ export const IssueList = React.memo((props: React.PropsWithChildren<IssueListPro
 		}
 	};
 
-	const isValidQuery = (query) => {
-		if(!(addingCustomFilterForProvider?.id === "github*com" || addingCustomFilterForProvider?.id === "github/enterprise")) {
-			setValidQuery(true);
-			return true;
-		}
-		// Verify if valid query
-		const queryStr = query.replace(/:/g, " ").split(/\s+/);
-		for (let word of queryStr) {
-			if (validQueries.has(word)) {
-				setValidQuery(true);
-				return true;
+	const isValidQuery = query => {
+		if (
+			addingCustomFilterForProvider?.id === "github*com" ||
+			addingCustomFilterForProvider?.id === "github/enterprise"
+		) {
+			// Verify if valid query for Github
+			const queryStr = query.replace(/:/g, " ").split(/\s+/);
+			for (let word of queryStr) {
+				if (validGHQueries.has(word)) {
+					setValidQuery(true);
+					return true;
+				}
 			}
+			setValidQuery(false);
+			return false;
+		} else if (
+			addingCustomFilterForProvider?.id === "gitlab*com" ||
+			addingCustomFilterForProvider?.id === "gitlab/enterprise"
+		) {
+			// Verify if valid query for Gitlab
+			const queryStr = query.replace(/[=&]/g, " ").split(/\s+/);
+			for (let word of queryStr) {
+				if (validGLQueries.has(word)) {
+					setValidQuery(true);
+					return true;
+				}
+			}
+			setValidQuery(false);
+			return false;
 		}
-		setValidQuery(false);
-		return false;
+		setValidQuery(true);
+		return true;
 	};
 
 	const testCustomFilter = async query => {
@@ -919,8 +951,27 @@ export const IssueList = React.memo((props: React.PropsWithChildren<IssueListPro
 				customFilter: newCustomFilter,
 				providerId: id
 			});
-			setLoadingTest(false);
-			setTestCards(response.cards || ([] as any));
+
+			if (response.error) {
+				setErrorQuery(true);
+			} else {
+				setErrorQuery(false);
+			}
+
+			if (id !== "") {
+				const provider = props.providers.find(_ => _.id === id);
+				const cardsWithProvider = response.cards.map(card => {
+					return {
+						...card,
+						provider
+					};
+				});
+				setLoadingTest(false);
+				setTestCards(cardsWithProvider || ([] as any));
+			} else {
+				setLoadingTest(false);
+				setTestCards(response.cards || ([] as any));
+			}
 		}
 	};
 
@@ -936,6 +987,7 @@ export const IssueList = React.memo((props: React.PropsWithChildren<IssueListPro
 
 	const closeCustomFilter = () => {
 		setValidQuery(true);
+		setErrorQuery(false);
 		setAddingCustomFilterForProvider(undefined);
 		setNewCustomFilter("");
 		setNewCustomFilterName("");
@@ -950,9 +1002,9 @@ export const IssueList = React.memo((props: React.PropsWithChildren<IssueListPro
 				<Dialog title="Create a Custom Filter" onClose={closeCustomFilter}>
 					<div className="standard-form">
 						<fieldset className="form-body">
-						<span dangerouslySetInnerHTML={{ __html: providerDisplay.customFilterHelp || "" }} />
-						<span> {providerDisplay.customFilterExample}</span>
-						<input
+							<span dangerouslySetInnerHTML={{ __html: providerDisplay.customFilterHelp || "" }} />
+							<span> {providerDisplay.customFilterExample}</span>
+							<input
 								type="text"
 								className="input-text control"
 								value={newCustomFilterName}
@@ -960,7 +1012,7 @@ export const IssueList = React.memo((props: React.PropsWithChildren<IssueListPro
 								placeholder="Name Your Custom Filter (optional)"
 								style={{ margin: "20px 0 10px 0" }}
 							/>
-							{!validQuery && (
+							{!validQuery ? (
 								<ErrorMessage>
 									<small className="error-message">
 										Missing required qualifier.{" "}
@@ -969,7 +1021,17 @@ export const IssueList = React.memo((props: React.PropsWithChildren<IssueListPro
 										</Link>
 									</small>
 								</ErrorMessage>
+							) : (
+								errorQuery && (
+									<ErrorMessage>
+										<small className="error-message">
+											Invalid query.{" "}
+											<Link href="https://docs.gitlab.com/ee/api/issues.html">Learn more.</Link>
+										</small>
+									</ErrorMessage>
+								)
 							)}
+
 							<input
 								type="text"
 								className="input-text control"
@@ -977,7 +1039,7 @@ export const IssueList = React.memo((props: React.PropsWithChildren<IssueListPro
 								value={newCustomFilter}
 								onChange={e => setNewCustomFilter(e.target.value)}
 								placeholder="Enter Custom Filter"
-							/>							
+							/>
 							<ButtonRow>
 								<Button
 									disabled={newCustomFilter.length == 0}
@@ -1157,6 +1219,18 @@ export const IssueList = React.memo((props: React.PropsWithChildren<IssueListPro
 						</>
 					)}
 					{firstLoad && <LoadingMessage align="left">Loading...</LoadingMessage>}
+					{cards.length == 0 &&
+					selectedLabel !== "issues assigned to you" &&
+					!props.loadingMessage &&
+					(props.providers.length > 0 || derivedState.skipConnect) ? (
+						<FilterMissing>The selected filter(s) did not return any issues.</FilterMissing>
+					) : (
+						!props.loadingMessage &&
+						(props.providers.length > 0 || derivedState.skipConnect) &&
+						cards.length == 0 && (
+							<FilterMissing>There are no open issues assigned to you.</FilterMissing>
+						)
+					)}
 					{cards.map(card => (
 						<Row
 							key={card.key}
@@ -1374,4 +1448,11 @@ const IssueMissing = styled.div`
 	text-align: center;
 	padding: 0px 20px 0px 20px;
 	margin-top: -20px;
+`;
+
+const FilterMissing = styled.div`
+	text-align: left;
+	padding: 10px 20px 0px 20px;
+	color: @text-color-subtle;
+	font-size: 12px;
 `;

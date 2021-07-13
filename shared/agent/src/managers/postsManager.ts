@@ -936,24 +936,39 @@ export class PostsManager extends EntityManagerBase<CSPost> {
 				// moves to the next line as truly single line comments
 				endLine = startLine;
 			}
-			const repoPath = path.join(gitRepo ? gitRepo.path : "", parsedUri.path);
-			// get the diff hunk between the two shas
-			const diff = await git.getDiffBetweenCommits(
-				parsedUri.leftSha,
-				parsedUri.rightSha,
-				repoPath,
-				true
-			);
+
+			let diff;
+			if (parsedUri.previousFilePath && parsedUri.previousFilePath !== parsedUri.path) {
+				// file was renamed
+				diff = await git.getDiffBetweenCommitsAndFiles(
+					parsedUri.leftSha,
+					parsedUri.rightSha,
+					gitRepo?.path || "",
+					parsedUri.previousFilePath,
+					parsedUri.path,
+					true
+				);
+			} else {
+				// get the diff hunk between the two shas
+				diff = await git.getDiffBetweenCommits(
+					parsedUri.leftSha,
+					parsedUri.rightSha,
+					path.join(gitRepo ? gitRepo.path : "", parsedUri.path),
+					true
+				);
+			}
+
 			if (!diff) {
-				const errorMessage = `Could not find diff for leftSha=${parsedUri.leftSha} rightSha=${parsedUri.rightSha} repoPath=${repoPath}`;
+				const errorMessage = `Could not find diff for leftSha=${parsedUri.leftSha} rightSha=${parsedUri.rightSha} path=${parsedUri.path} previousFilePath=${parsedUri.previousFilePath}`;
 				Logger.warn(errorMessage);
 				throw new Error(errorMessage);
 			}
+
 			const startHunk = diff.hunks.find(
-				_ => startLine >= _.newStart && startLine <= _.newStart + _.newLines
+				_ => startLine >= _.newStart && startLine < _.newStart + _.newLines
 			);
 			const endHunk = diff.hunks.find(
-				_ => endLine >= _.newStart && endLine <= _.newStart + _.newLines
+				_ => endLine >= _.newStart && endLine < _.newStart + _.newLines
 			);
 
 			let fileWithUrl;
@@ -988,8 +1003,8 @@ export class PostsManager extends EntityManagerBase<CSPost> {
 			}
 
 			let result: Promise<Directives>;
-			// only fall in here if we don't have a start OR we dont have both
-			if (!startHunk || (!startHunk && !endHunk)) {
+			// only fall in here if we don't have a start OR we have a range and we don't have both
+			if ((startLine !== endLine && (!startHunk || !endHunk)) || !startHunk) {
 				// if we couldn't find a hunk, we're going to go down the path of using
 				// a "code fence" aka ``` for showing the code comment
 				Logger.warn(
@@ -1040,6 +1055,7 @@ export class PostsManager extends EntityManagerBase<CSPost> {
 							sha: parsedUri.rightSha,
 							filePath: parsedUri.path,
 							startLine: startLine,
+							endLine: endLine,
 							position: lineWithMetadata.position
 						}
 					});

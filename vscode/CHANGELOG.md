@@ -1,5 +1,59 @@
 # Change Log
 
+## [11.0.12] - 2021-6-30
+
+### Changed
+
+- Changes to a pull requests's title and labels are immediately reflected in the Pull/Merge Request section after saving the changes
+- Fall back to using first intial for a headshot when headshots in pull requests aren't accessible
+- Clicking on images in pull requests now open the full-size image on the web
+
+### Fixed
+
+- Fixes a "Cannot read property 'full' of undefined" error in the Merge Requests section
+- Fixes an issue with double quotes needing to be escaped when creating a custom PR filter for GitHub
+- Fixes an issue where you can't start a PR review when the commit selection is anything other than "Changes from all commits"
+
+## [11.0.11] - 2021-6-22
+
+### Added
+
+- Adds the ability to create a custom filer in the Issues section for GitLab
+
+### Changed
+
+- Adds confirmation when user cancels a pending pull/merge request review
+- Live View is now free for all teams
+- Adds copy to the Issues section when there are no results to display
+
+### Fixed
+
+- Fixes an issue with emoji not rendering in labels for pull requests
+
+## [11.0.10] - 2021-6-7
+
+### Changed
+
+- Updated terms-of-service acceptance flow
+
+## [11.0.9] - 2021-6-3
+
+### Changed
+
+- You can now reply to any top-level comment in a merge request, regardless of whether or not it was started as a thread
+- Form that automatically pops up to request feedback when you commit is now dismissed after 15 minutes of inactivity
+- Changing branches while you have the feedback request form open no longer updates the form
+
+### Fixed
+
+- Addresses [#595](https://github.com/TeamCodeStream/CodeStream/issues/595) &mdash; Connectivity Issues Makes CodeStream Unusable
+- Addresses [#590](https://github.com/TeamCodeStream/CodeStream/issues/590) &mdash; Commit selection is reset for a Gitlab MR after posting a comment
+- Addresses [#522](https://github.com/TeamCodeStream/CodeStream/issues/522) &mdash; Support multi-line comments in GL MR
+- Addresses [#400](https://github.com/TeamCodeStream/CodeStream/issues/400) &mdash; Agent is detected as a new process by Intego NetBarrier every time IntelliJ starts
+- Fixes an issue with quote replies in a merge request where the reply text would get included in the quote
+- Fixes an issue where resolving a codemark or feedback request marks it as unread in the Codemarks/Feedback Requests section of the CodeStream pane
+- Fixes an issue with the Commits tab in a pull/merge request showing commits in the wrong order
+
 ## [11.0.8] - 2021-5-21
 
 ### Changed
@@ -72,7 +126,7 @@
 - Fixes an issue where trying to view a pull request via list/tree view results in an error
 - Addresses [#429](https://github.com/TeamCodeStream/CodeStream/issues/429) &mdash; Incorrect user/repo listed at bottom of a PR
 - Fixes an issue where hitting Esc to close the comment form in a pull request exits you out of the pull request completely
-- Fixes an issue where some loading/saving messages in pull requests don't go away after completion 
+- Fixes an issue where some loading/saving messages in pull requests don't go away after completion
 - Fixes an issue where merge requests created with unpushed branches lead to GraphQL error
 - Fixes an issue with the display of images in merge request descriptions
 - Fixes an issue replying to an existing comment in a merge request while there is a pending review
@@ -256,7 +310,7 @@
 - Addresses [#388](https://github.com/TeamCodeStream/CodeStream/issues/388) &mdash; Codemark issue with filenames containing "+" char
 - Fixes an unexpected error when clicking on a pull request
 - Fixes an issue with the count in the heading of the Coedmarks section being incorrect when filter isn't set to the current file
-- Fixes an issue commenting in a pull request in a file in a folder that doesn't exist in your current branch 
+- Fixes an issue commenting in a pull request in a file in a folder that doesn't exist in your current branch
 - Fixes an issue with the Slack integration not appearing as a green tile on the Integrations page immediately after connecting
 - Fixes an issue with the Locate button not working in a feedback request when you don't have the given repo open
 - Fixes an issue with commenting on code in files that are symlinks
@@ -291,7 +345,7 @@
 
 ### Fixed
 
-- Addresses [#392](https://github.com/TeamCodeStream/CodeStream/issues/392) &mdash; Codemark not showing code block when created from Windows 
+- Addresses [#392](https://github.com/TeamCodeStream/CodeStream/issues/392) &mdash; Codemark not showing code block when created from Windows
 
 ## [10.4.2] - 2021-1-29
 
@@ -327,7 +381,7 @@
 
 ### Fixed
 
-- Addresses [#380](https://github.com/TeamCodeStream/CodeStream/issues/380) &mdash; Viewing a PR with status checks on GitHub Enterprise generates an error 
+- Addresses [#380](https://github.com/TeamCodeStream/CodeStream/issues/380) &mdash; Viewing a PR with status checks on GitHub Enterprise generates an error
 - Addresses [#376](https://github.com/TeamCodeStream/CodeStream/issues/376) &mdash; Can't exit preview mode when creating a feedback request
 - Fixes an issue where you'd end up in an infinite "Fetching repo..." loop trying to create an issue on Bitbucket
 - Fixes an issue creating a permalink when in a WSL environment
@@ -371,16 +425,16 @@
 
 ### Added
 
-- Split the Feedback Requests section of the sidebar into sections for Open, Approved and Needs Work 
+- Split the Feedback Requests section of the sidebar into sections for Open, Approved and Needs Work
 - When selecting a ticket to start work, added an option to pull latest if base branch is behind origin
-- Added the ability to set a default base branch per repo when creating a feature branch  
+- Added the ability to set a default base branch per repo when creating a feature branch
 
 ## [10.2.1] - 2020-12-23
 
 ### Added
 
 - Adds a new onboarding flow for some users that guides them through the setup of integrations and creating their first code comment
-- Adds support for remotes using SSH aliases 
+- Adds support for remotes using SSH aliases
 
 ### Changed
 

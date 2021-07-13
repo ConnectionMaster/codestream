@@ -405,8 +405,9 @@ export const Timeline = (props: Props) => {
 								text={
 									note.bodyHtml
 										? note.bodyHtml
-												.replace(/\<p /g, '<table class="gitlab-table" ')
+												.replace(/\<table /g, '<table class="gitlab-table" ')
 												.replace(/\<pre.+?\>/g, "<pre>")
+												.replace(/(?=((?!<\/a).)*<img.+?<\/a>)href="/g, `href=\"${pr.baseWebUrl}`)
 										: note.body
 								}
 								isHtml={note.bodyHtml != null}
@@ -569,7 +570,9 @@ export const Timeline = (props: Props) => {
 			);
 		}
 
-		const className = note.resolvable && !note.resolved ? "unresolved-thread-start" : "";
+		// force all notes to be resolvable
+		const isResolvable = true;
+		const className = isResolvable && !note.resolved ? "unresolved-thread-start" : "";
 		// if it's a review thread, and the thread is collapsed, just
 		// render the header
 		if (note.position && hiddenComments[note.id])
@@ -583,8 +586,8 @@ export const Timeline = (props: Props) => {
 		return (
 			<OutlineBox style={{ padding: "10px" }} key={note.id} className={className}>
 				{note.position && printCodeCommentHeader(note)}
-				{printComment(note, undefined, 0, note.resolvable, note.resolved)}
-				{note.resolvable && (
+				{printComment(note, undefined, 0, isResolvable, note.resolved)}
+				{isResolvable && (
 					<>
 						{replies.length > 0 && !note.position && (
 							<Collapse

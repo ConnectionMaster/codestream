@@ -190,6 +190,7 @@ const EMPTY_HASH_2 = {} as any;
 
 let hasRenderedOnce = false;
 const e: ThirdPartyProviderConfig[] = [];
+
 export const OpenPullRequests = React.memo((props: Props) => {
 	const dispatch = useDispatch();
 	const mountedRef = useRef(false);
@@ -327,7 +328,6 @@ export const OpenPullRequests = React.memo((props: Props) => {
 						console.error(ex);
 					}
 				}
-				// console.warn("SETTING TO: ", newGroups);
 				setPullRequestGroups(newGroups);
 			} catch (ex) {
 				console.error(ex);
@@ -384,6 +384,16 @@ export const OpenPullRequests = React.memo((props: Props) => {
 			clearInterval(disposable);
 		};
 	}, [queries]);
+
+	useEffect(() => {
+		const newGroups = {};
+		for (const connectedProvider of PRConnectedProviders) {
+			if (derivedState.myPullRequests && derivedState.myPullRequests[connectedProvider.id]) {
+				newGroups[connectedProvider.id] = derivedState.myPullRequests[connectedProvider.id].data;
+			}
+		}
+		setPullRequestGroups(newGroups);
+	}, [derivedState.myPullRequests]);
 
 	useEffect(() => {
 		if (!mountedRef.current) return;
@@ -825,6 +835,7 @@ export const OpenPullRequests = React.memo((props: Props) => {
 													{selected && <Icon name="arrow-right" className="selected-icon" />}
 													<PRHeadshot
 														person={{
+															login: pr.author.login,
 															avatarUrl: pr.author.avatar_url
 														}}
 													/>

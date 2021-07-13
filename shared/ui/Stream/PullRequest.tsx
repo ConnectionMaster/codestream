@@ -57,7 +57,9 @@ import {
 	clearPullRequestFiles,
 	getPullRequestConversations,
 	clearPullRequestCommits,
-	api
+	api,
+	updatePullRequestTitle,
+	setProviderError
 } from "../store/providerPullRequests/actions";
 import {
 	getCurrentProviderPullRequest,
@@ -142,7 +144,8 @@ export const PullRequest = () => {
 			textEditorUri: state.editorContext.textEditorUri,
 			reposState: state.repos,
 			checkoutBranch: state.context.pullRequestCheckoutBranch,
-			currentRepo: getProviderPullRequestRepo(state)
+			currentRepo: getProviderPullRequestRepo(state),
+			labels: currentPullRequest?.conversations?.repository?.pullRequest?.labels
 		};
 	});
 
@@ -174,6 +177,7 @@ export const PullRequest = () => {
 	const [autoCheckedMergeability, setAutoCheckedMergeability] = useState<
 		autoCheckedMergeabilityStatus
 	>("UNCHECKED");
+	const [prCommitsRange, setPrCommitsRange] = useState<string[]>([]);
 
 	const switchActiveTab = tab => {
 		// remember the scroll position of the tab we just left
@@ -370,12 +374,28 @@ export const PullRequest = () => {
 	}, [pr, openRepos, currentRepoChanged]);
 
 	const saveTitle = async () => {
-		setIsLoadingMessage("Saving Title...");
-		setSavingTitle(true);
-		await dispatch(api("updatePullRequestTitle", { title }));
-		setSavingTitle(false);
-		setEditingTitle(false);
-		setIsLoadingMessage("");
+		try {
+			setIsLoadingMessage("Saving Title...");
+			setSavingTitle(true);
+			const response = await dispatch(api("updatePullRequestTitle", { title }));
+			if (response !== undefined) {
+				dispatch(
+					updatePullRequestTitle(
+						derivedState.currentPullRequestProviderId!,
+						derivedState.currentPullRequestId!,
+						{ title: title }
+					)
+				);
+			}
+		} catch (er) {
+			dispatch(setProviderError(derivedState.currentPullRequestProviderId!, derivedState.currentPullRequestId!, {
+				message: "Error saving title"
+			}));
+		} finally {
+			setSavingTitle(false);
+			setEditingTitle(false);
+			setIsLoadingMessage("");
+		}
 	};
 
 	const getOpenRepos = async () => {
@@ -922,6 +942,8 @@ export const PullRequest = () => {
 										pr={pr}
 										initialScrollPosition={scrollPosition[4]}
 										setIsLoadingMessage={setIsLoadingMessage}
+										prCommitsRange={prCommitsRange}
+										setPrCommitsRange={setPrCommitsRange}
 									/>
 								)}
 							</div>

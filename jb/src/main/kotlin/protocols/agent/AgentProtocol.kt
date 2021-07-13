@@ -225,8 +225,8 @@ class GetReviewContentsResult(
     val repoRoot: String?,
     val leftPath: String,
     val rightPath: String,
-    val left: String,
-    val right: String
+    val left: String?,
+    val right: String?
 )
 
 class TextDocumentFromKeyParams(val key: Int)
@@ -364,6 +364,7 @@ class getPullRequestFilesParams(
 
 class PullRequestFile (
     val sha: String,
+    val previousFilename: String?,
     val filename: String,
     val status: String,
     val additions: Int,

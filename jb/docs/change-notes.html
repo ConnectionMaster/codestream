@@ -1,3 +1,55 @@
+<h4 id="11_0_11">11.0.11</h4>
+<h5>Changed</h5>
+<ul>
+    <li>Brings back support for JXBrowser and Android Studio (v4.2 or later)</li>
+    <li>Auto-prompt for feedback requests can be turned off via toggle above the form even when committing from within the IDE</li>
+    <li>Changes to a pull requests's title and labels are immediately reflected in the Pull/Merge Request section after saving the changes</li>
+    <li>Fall back to using first intial for a headshot when headshots in pull requests aren't accessible</li>
+    <li>Clicking on images in pull requests now open the full-size image on the web</li>
+</ul>
+<h5>Fixed</h5>
+<ul>
+    <li>Fixes a "Cannot read property 'full' of undefined" error in the Merge Requests section</li>
+    <li>Fixes an issue with double quotes needing to be escaped when creating a custom PR filter for GitHub</li>
+    <li>Fixes an issue where you can't start a PR review when the commit selection is anything other than "Changes from all commits"</li>
+    <li>Fixes a "Registry key not defined error" with IntelliJ EAP</li>
+</ul>
+<h4 id="11_0_10">11.0.10</h4>
+<h5>Changed</h5>
+<ul>
+    <li>Adds the ability to create a custom filer in the Issues section for GitLab</li>
+    <li>Adds confirmation when user cancels a pending pull/merge request review</li>
+    <li>Live View is now free for all teams</li>
+    <li>Adds copy to the Issues section when there are no results to display</li>
+</ul>
+<h5>Fixed</h5>
+<ul>
+    <li>Fixes an issue with emoji not rendering in labels for pull requests</li>
+</ul>
+<h4 id="11_0_9">11.0.9</h4>
+<h5>Changed</h5>
+<ul>
+    <li>Updated terms-of-service acceptance flow</li>
+    <li>Removed support for JXBrowser</li>
+</ul>
+<h4 id="11_0_8">11.0.8</h4>
+<h5>Changed</h5>
+<ul>
+    <li>You can now reply to any top-level comment in a merge request, regardless of whether or not it was started as a thread</li>
+    <li>Form that automatically pops up to request feedback when you commit is now dismissed after 15 minutes of inactivity</li>
+    <li>Changing branches while you have the feedback request form open no longer updates the form</li>
+</ul>
+<h5>Fixed</h5>
+<ul>
+    <li>Addresses <a href="https://github.com/TeamCodeStream/CodeStream/issues/595">#595</a> - Connectivity Issues Makes CodeStream Unusable
+    <li>Addresses <a href="https://github.com/TeamCodeStream/CodeStream/issues/590">#590</a> - Commit selection is reset for a Gitlab MR after posting a comment
+    <li>Addresses <a href="https://github.com/TeamCodeStream/CodeStream/issues/522">#522</a> - Support multi-line comments in GL MR
+    <li>Addresses <a href="https://github.com/TeamCodeStream/CodeStream/issues/400">#400</a> - Agent is detected as a new process by Intego NetBarrier every time IntelliJ starts
+    <li>Fixes an issue with quote replies in a merge request where the reply text would get included in the quote</li>
+    <li>Fixes an unhandled exception when tail of file is collapsed</li>
+    <li>Fixes an issue where resolving a codemark or feedback request marks it as unread in the Codemarks/Feedback Requests section of the CodeStream pane</li>
+    <li>Fixes an issue with the Commits tab in a pull/merge request showing commits in the wrong order</li>
+</ul>
 <h4 id="11_0_7">11.0.7</h4>
 <h5>Changed</h5>
 <ul>

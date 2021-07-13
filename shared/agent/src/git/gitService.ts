@@ -1,6 +1,6 @@
 "use strict";
 /**
-adapted from https://github.com/eamodio/vscode-gitlens
+Portions adapted from https://github.com/eamodio/vscode-gitlens/blob/12a93fe5f609f0bb154dca1a8d09ac3e980b9b3b/src/git/gitService.ts which carries this notice:
 
 The MIT License (MIT)
 
@@ -23,10 +23,11 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-Copyright (c) 2018-2021 CodeStream Inc.
-
 */
+
+/**
+ * Modifications Copyright CodeStream Inc. under the Apache 2.0 License (Apache-2.0)
+ */
 
 import { createPatch, ParsedDiff, parsePatch } from "diff";
 import * as fs from "fs";
@@ -436,6 +437,58 @@ export class GitService implements IGitService, Disposable {
 			Logger.error(err);
 			Logger.warn(
 				`Error getting diff from ${initialCommitHash} to ${finalCommitHash} for ${relativePath}`
+			);
+			return;
+		}
+
+		const patches = parsePatch(data);
+		if (patches.length > 1) {
+			Logger.warn("Parsed diff generated multiple patches");
+		}
+		return patches[0];
+	}
+
+	async getDiffBetweenCommitsAndFiles(
+		initialCommitHash: string,
+		finalCommitHash: string,
+		repositoryPath: string,
+		filePath1: string,
+		filePath2: string,
+		fetchIfCommitNotFound: boolean = false,
+		contextLines: number = 3
+	): Promise<ParsedDiff | undefined> {
+		const repoAndRelativePath = await this._getRepoAndRelativePath(repositoryPath);
+		if (!repoAndRelativePath) return undefined;
+		const { repoPath, relativePath } = repoAndRelativePath;
+		let data;
+		try {
+			data = await git(
+				{ cwd: repoPath },
+				"diff",
+				"--no-ext-diff",
+				`-U${contextLines}`,
+				`${initialCommitHash}:${filePath1}`,
+				`${finalCommitHash}:${filePath2}`
+			);
+		} catch (err) {
+			if (fetchIfCommitNotFound) {
+				Logger.log("Commit not found - fetching all remotes");
+				const didFetch = await this.fetchAllRemotes(repoPath);
+				if (didFetch) {
+					return this.getDiffBetweenCommitsAndFiles(
+						initialCommitHash,
+						finalCommitHash,
+						repositoryPath,
+						filePath1,
+						filePath2,
+						false
+					);
+				}
+			}
+
+			Logger.error(err);
+			Logger.warn(
+				`Error getting diff from ${initialCommitHash}:${filePath1} to ${finalCommitHash}:${filePath2}for ${relativePath}`
 			);
 			return;
 		}

@@ -1,11 +1,12 @@
-import React, { useState, useReducer, useCallback, useMemo, FunctionComponent } from "react";
+import React, { useState, useReducer, useCallback, useMemo, useEffect } from "react";
 import { shallowEqual, useDispatch, useSelector } from "react-redux";
 import { OpenUrlRequestType } from "@codestream/protocols/webview";
 import { CodeStreamState } from "../store";
 import { Button } from "../src/components/Button";
-import { CSMe } from "@codestream/protocols/api";
+import { CSMe, PullRequestQuery } from "@codestream/protocols/api";
 import { isFeatureEnabled } from "../store/apiVersioning/reducer";
 import { getCurrentProviderPullRequest } from "../store/providerPullRequests/reducer";
+import { getMyPullRequests } from "../store/providerPullRequests/actions";
 import Icon from "./Icon";
 import Timestamp from "./Timestamp";
 import Tooltip from "./Tooltip";
@@ -64,6 +65,11 @@ import { autoCheckedMergeabilityStatus } from "./PullRequest";
 import cx from "classnames";
 import { getPRLabel } from "../store/providers/reducer";
 import { useDidMount } from "../utilities/hooks";
+import * as providerSelectors from "../store/providers/reducer";
+import { FetchProviderDefaultPullRequestsType } from "@codestream/protocols/agent";
+
+const emojiMap: { [key: string]: string } = require("../../agent/emoji/emojis.json");
+const emojiRegex = /:([-+_a-z0-9]+):/g;
 
 export const Circle = styled.div`
 	width: 12px;
@@ -216,6 +222,8 @@ export const PullRequestConversationTab = (props: {
 		const currentPullRequest = getCurrentProviderPullRequest(state);
 		const { preferences, ide } = state;
 
+		const prConnectedProviders = providerSelectors.getConnectedSupportedPullRequestHosts(state);
+
 		return {
 			defaultMergeMethod: preferences.lastPRMergeMethod || "SQUASH",
 			currentUser,
@@ -224,6 +232,9 @@ export const PullRequestConversationTab = (props: {
 				: undefined,
 			blameMap,
 			currentPullRequest: currentPullRequest,
+			currentPullRequestProviderId: state.context.currentPullRequest
+				? state.context.currentPullRequest.providerId
+				: undefined,
 			pr:
 				currentPullRequest &&
 				currentPullRequest.conversations &&
@@ -232,7 +243,14 @@ export const PullRequestConversationTab = (props: {
 			team,
 			skipGitEmailCheck,
 			addBlameMapEnabled,
-			isInVscode: ide.name === "VSC"
+			isInVscode: ide.name === "VSC",
+			pullRequestQueries: state.preferences.pullRequestQueries,
+			PRConnectedProviders: prConnectedProviders,
+			GitLabConnectedProviders: providerSelectors.getConnectedGitLabHosts(state),
+			allRepos:
+				preferences.pullRequestQueryShowAllRepos == null
+					? true
+					: preferences.pullRequestQueryShowAllRepos
 		};
 	});
 	const { pr } = derivedState;
@@ -250,6 +268,7 @@ export const PullRequestConversationTab = (props: {
 	const [clInstructionsIsOpen, toggleClInstructions] = useReducer((open: boolean) => !open, false);
 	const [cloneURLType, setCloneURLType] = useState("https");
 	const [cloneURL, setCloneURL] = useState(pr && pr.repository ? `${pr.repository.url}.git` : "");
+	const [defaultQueries, setDefaultQueries] = React.useState({});
 
 	const __onDidRender = functions => {
 		insertText = functions.insertTextAtCursor;
@@ -262,6 +281,18 @@ export const PullRequestConversationTab = (props: {
 			const container = document.getElementById("pr-scroll-container");
 			if (container) container.scrollTo({ top: props.initialScrollPosition });
 		}
+	});
+
+	useDidMount(() => {
+		(async () => {
+			const defaultQueriesResponse: any = (await HostApi.instance.send(
+				FetchProviderDefaultPullRequestsType,
+				{}
+			)) as any;
+			if (defaultQueriesResponse) {
+				setDefaultQueries(defaultQueriesResponse);
+			}
+		})();
 	});
 
 	const quote = text => {
@@ -477,6 +508,11 @@ export const PullRequestConversationTab = (props: {
 		);
 
 		setIsLoadingMessage("");
+
+		await new Promise(resolve => {
+			setTimeout(resolve, 2000);
+		});
+		fetchPRs();
 	};
 	const addReviewer = async id => {
 		setIsLoadingMessage("Requesting Review...");
@@ -487,6 +523,11 @@ export const PullRequestConversationTab = (props: {
 			})
 		);
 		setIsLoadingMessage("");
+
+		await new Promise(resolve => {
+			setTimeout(resolve, 2000);
+		});
+		fetchPRs();
 	};
 
 	const fetchAvailableAssignees = async (e?) => {
@@ -547,6 +588,11 @@ export const PullRequestConversationTab = (props: {
 			})
 		);
 		setIsLoadingMessage("");
+
+		await new Promise(resolve => {
+			setTimeout(resolve, 2000);
+		});
+		fetchPRs();
 	};
 
 	const fetchAvailableLabels = async (e?) => {
@@ -569,7 +615,7 @@ export const PullRequestConversationTab = (props: {
 					label: (
 						<>
 							<Circle style={{ backgroundColor: `#${_.color}` }} />
-							{_.name}
+							{_.name.replace(emojiRegex, (s: string, code: string) => emojiMap[code] || s)}
 						</>
 					),
 					searchLabel: _.name,
@@ -587,6 +633,7 @@ export const PullRequestConversationTab = (props: {
 
 	const setLabel = async (id: string, onOff: boolean) => {
 		setIsLoadingMessage(onOff ? "Adding Label..." : "Removing Label...");
+
 		await dispatch(
 			api("setLabelOnPullRequest", {
 				labelId: id,
@@ -594,6 +641,40 @@ export const PullRequestConversationTab = (props: {
 			})
 		);
 		setIsLoadingMessage("");
+
+		await new Promise(resolve => {
+			setTimeout(resolve, 2000);
+		});
+		fetchPRs();
+	};
+
+	const fetchPRs = async () => {
+		for (const connectedProvider of derivedState.PRConnectedProviders) {
+			if (connectedProvider.id === derivedState.currentPullRequestProviderId) {
+				try {
+					if (derivedState.pullRequestQueries || defaultQueries[connectedProvider.id]) {
+						const options = { force: true, alreadyLoading: false };
+
+						const providerQuery: PullRequestQuery[] = derivedState.pullRequestQueries
+							? derivedState.pullRequestQueries[connectedProvider.id]
+							: defaultQueries[connectedProvider.id];
+						const queryStrings = Object.values(providerQuery).map(_ => _.query);
+
+						await dispatch(
+							getMyPullRequests(
+								connectedProvider.id,
+								queryStrings,
+								!derivedState.allRepos,
+								options,
+								true
+							)
+						);
+					}
+				} catch (error) {
+					console.error(error);
+				}
+			}
+		}
 	};
 
 	const fetchAvailableProjects = async (e?) => {
@@ -640,6 +721,11 @@ export const PullRequestConversationTab = (props: {
 			})
 		);
 		setIsLoadingMessage("");
+
+		await new Promise(resolve => {
+			setTimeout(resolve, 2000);
+		});
+		fetchPRs();
 	};
 
 	const fetchAvailableMilestones = async (e?) => {
@@ -691,6 +777,11 @@ export const PullRequestConversationTab = (props: {
 			})
 		);
 		setIsLoadingMessage("");
+
+		await new Promise(resolve => {
+			setTimeout(resolve, 2000);
+		});
+		fetchPRs();
 	};
 
 	// const fetchAvailableIssues = async (e?) => {
@@ -1334,9 +1425,20 @@ export const PullRequestConversationTab = (props: {
 						</InlineMenu>
 					</h1>
 					{pr.labels && pr.labels.nodes.length > 0
-						? pr.labels.nodes.map((_, index) => (
-								<Tag key={index} tag={{ label: _.name, color: `#${_.color}` }} />
-						  ))
+						? pr.labels.nodes.map((_, index) => {
+								return (
+									<Tag
+										key={index}
+										tag={{
+											label: _.name.replace(
+												emojiRegex,
+												(s: string, code: string) => emojiMap[code] || s
+											),
+											color: `#${_.color}`
+										}}
+									/>
+								);
+						  })
 						: "None yet"}
 				</PRSection>
 				<PRSection>

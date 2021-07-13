@@ -7,14 +7,11 @@ import com.codestream.protocols.agent.GetReviewContentsResult
 import com.codestream.protocols.webview.ReviewNotifications
 import com.codestream.sessionService
 import com.codestream.webViewService
-import com.intellij.diff.DiffDialogHints
-import com.intellij.diff.DiffManagerEx
 import com.intellij.diff.chains.DiffRequestChain
+import com.intellij.diff.editor.ChainDiffVirtualFile
 import com.intellij.diff.editor.DiffRequestProcessorEditor
-import com.intellij.diff.editor.DiffVirtualFile
 import com.intellij.diff.editor.SimpleDiffVirtualFile
 import com.intellij.diff.impl.CacheDiffRequestChainProcessor
-import com.intellij.diff.impl.DiffRequestProcessor
 import com.intellij.diff.requests.SimpleDiffRequest
 import com.intellij.diff.tools.simple.SimpleDiffTool
 import com.intellij.diff.util.DiffUserDataKeysEx
@@ -23,7 +20,6 @@ import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Key
 import com.intellij.openapi.util.KeyWithDefaultValue
-import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.vfs.VirtualFile
 import org.eclipse.lsp4j.Range
 import java.lang.reflect.Field
@@ -51,7 +47,6 @@ class ReviewService(private val project: Project) {
             .also { it.isAccessible = true }
     private var diffChain: DiffRequestChain? = null
     private var currentKey: String? = null
-    private var timeInMillisOflastReviewFromInternalCommit: Long? = null
 
     suspend fun showDiff(reviewId: String, repoId: String, checkpoint: Int?, path: String) {
         val agent = project.agentService ?: return
@@ -82,10 +77,7 @@ class ReviewService(private val project: Project) {
             diffChain = myDiffChain
 
             ApplicationManager.getApplication().invokeLater {
-                val diffFile = object : DiffVirtualFile() {
-                    override fun createProcessor(project: Project): DiffRequestProcessor = CacheDiffRequestChainProcessor(project, myDiffChain)
-                    override fun getName(): String = "Feedback Request"
-                }
+                val diffFile = ChainDiffVirtualFile(myDiffChain, "Feedback Request")
                 FileEditorManager.getInstance(project).openFile(diffFile, true)
             }
         }
@@ -146,7 +138,7 @@ class ReviewService(private val project: Project) {
                 repoId,
                 ReviewDiffSide.LEFT,
                 oldPath ?: path,
-                contents.left
+                contents.left ?: ""
             )
         val rightContent =
             createReviewDiffContent(
@@ -157,7 +149,7 @@ class ReviewService(private val project: Project) {
                 repoId,
                 ReviewDiffSide.RIGHT,
                 path,
-                contents.right
+                contents.right ?: ""
             )
         val diffRequest = SimpleDiffRequest(title, leftContent, rightContent, oldPath ?: path, path)
         diffRequest.putUserData(REVIEW_DIFF, true)
@@ -173,6 +165,7 @@ class ReviewService(private val project: Project) {
     suspend fun showRevisionsDiff(
         repoId: String,
         filePath: String,
+        previousFilePath: String?,
         headSha: String,
         headBranch: String,
         baseSha: String,
@@ -184,18 +177,18 @@ class ReviewService(private val project: Project) {
 
         if (reviewDiffEditor == null || diffChain == null || key != currentKey) {
             closeDiff()
-            val filesPath: List<String>
+            val filesPath: List<Pair<String, String?>> // filename / previous filename (optional)
             if (context?.pullRequest != null) {
                 val prFiles = agent.getPullRequestFiles(context.pullRequest.id, context.pullRequest.providerId)
-                filesPath = prFiles.map { it.filename }
+                filesPath = prFiles.map { Pair(it.filename, it.previousFilename) }
             } else {
-                filesPath = listOf(filePath)
+                filesPath = listOf(Pair(filePath, previousFilePath))
             }
 
             currentKey = key
 
             val producers = filesPath.map {
-                PullRequestProducer(project, repoId, it, headSha, headBranch, baseSha, baseBranch, context)
+                PullRequestProducer(project, repoId, it.first, it.second, headSha, headBranch, baseSha, baseBranch, context)
             }
 
             val myDiffChain = PullRequestChain(producers).also { chain ->
@@ -208,16 +201,16 @@ class ReviewService(private val project: Project) {
             }
             diffChain = myDiffChain
 
-            val registryValue = Registry.get("show.diff.as.editor.tab")
-            val original = registryValue.asBoolean()
+            val providerId = context?.pullRequest?.providerId ?: ""
+            val tabName = when {
+                providerId.contains("github", true) -> "Pull Request"
+                providerId.contains("gitlab", true) -> "Merge Request"
+                else -> "Diff"
+            }
 
             ApplicationManager.getApplication().invokeLater {
-                try {
-                    registryValue.setValue(true)
-                    DiffManagerEx.getInstance().showDiffBuiltin(project, myDiffChain, DiffDialogHints.FRAME)
-                } finally {
-                    registryValue.setValue(original)
-                }
+                val diffFile = ChainDiffVirtualFile(myDiffChain, tabName)
+                FileEditorManager.getInstance(project).openFile(diffFile, true)
             }
         }
 
@@ -250,27 +243,8 @@ class ReviewService(private val project: Project) {
         }
     }
 
-    fun createReviewFromInternalCommit() {
-        timeInMillisOflastReviewFromInternalCommit = System.currentTimeMillis()
-        ApplicationManager.getApplication().invokeLater {
-            project.codeStream?.show {
-                project.webViewService?.postNotification(
-                    ReviewNotifications.New(
-                        null,
-                        Range(),
-                        "JB Commit Dialog",
-                        true
-                    )
-                )
-            }
-        }
-    }
-
     fun createReviewFromExternalCommit() {
         if (project.sessionService?.userLoggedIn?.user?.preferences?.reviewCreateOnCommit == false) return
-        timeInMillisOflastReviewFromInternalCommit?.let {
-            if (System.currentTimeMillis() - it < 10 * 1000) return
-        }
 
         ApplicationManager.getApplication().invokeLater {
             project.codeStream?.show {

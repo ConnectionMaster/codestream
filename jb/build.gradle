@@ -6,7 +6,7 @@ plugins {
 }
 
 group "com.codestream"
-version "11.0.8"
+version "11.0.12"
 
 sourceCompatibility = 1.8
 
@@ -68,8 +68,8 @@ idea {
 intellij {
     type "IC"
     // the version parameter dictates which jars will be used at compilation time
-    version "2019.2.2" // earliest version we support
-    //  version "201.5616-EAP-CANDIDATE-SNAPSHOT"
+    version "2020.2" // earliest version we support
+    // version "201.5616-EAP-CANDIDATE-SNAPSHOT"
     // version "2019.2.3"
     // version "2019.3"
     // version "IC-2019.2.2"
@@ -144,92 +144,4 @@ copyDebugAgent.dependsOn buildDebugDeps
 
 task buildDebugDependencies {}
 buildDebugDependencies.dependsOn buildDebugDeps, copyDebugAgent
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

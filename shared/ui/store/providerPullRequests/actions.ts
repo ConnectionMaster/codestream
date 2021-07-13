@@ -42,6 +42,13 @@ export const _addPullRequestCollaborators = (providerId: string, id: string, col
 		collaborators
 	});
 
+export const updatePullRequestTitle = (providerId: string, id: string, pullRequestData: any) =>
+	action(ProviderPullRequestActionsTypes.UpdatePullRequestTitle, {
+		providerId,
+		id,
+		pullRequestData
+	});
+
 export const _addPullRequestFiles = (
 	providerId: string,
 	id: string,
@@ -542,13 +549,13 @@ export const api = <T = any, R = any>(
 			return;
 		}
 		({ providerId, id: pullRequestId } = currentPullRequest);
-
 		params = params || {};
 		if (!params.pullRequestId) params.pullRequestId = pullRequestId;
 		if (currentPullRequest.metadata) {
 			params = { ...params, ...currentPullRequest.metadata };
 			params.metadata = currentPullRequest.metadata;
 		}
+
 		const response = (await HostApi.instance.send(new ExecuteThirdPartyTypedType<T, R>(), {
 			method: method,
 			providerId: providerId,

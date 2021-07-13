@@ -11,7 +11,8 @@ export enum ProviderPullRequestActionsTypes {
 	ClearPullRequestCommits = "@providerPullRequests/ClearCommits",
 	AddPullRequestError = "@providerPullRequests/AddError",
 	ClearPullRequestError = "@providerPullRequests/ClearError",
-	HandleDirectives = "@providerPullRequests/HandleDirectives"
+	HandleDirectives = "@providerPullRequests/HandleDirectives",
+	UpdatePullRequestTitle = "@providerPullRequests/UpdatePullRequestTitle"
 }
 
 /**

@@ -251,7 +251,7 @@ export const FlexRow = styled.div`
 	.action-button-wrapper {
 		align-items: center;
 		display: flex;
-		flex-wrap: no-wrap;	
+		flex-wrap: no-wrap;
 		@media only screen and (max-width: 350px) {
 			flex-wrap: wrap;
 			justify-content: center;
@@ -269,6 +269,11 @@ const Description = styled.div`
 const TabActions = styled.div`
 	margin-top: -5px;
 	margin-left: auto;
+`;
+
+const InlineIcon = styled.div`
+	display: inline-block;
+	white-space: nowrap;
 `;
 
 const stateMap = {
@@ -333,6 +338,7 @@ export const PullRequest = () => {
 	const [title, setTitle] = useState("");
 	const [finishReviewOpen, setFinishReviewOpen] = useState(false);
 	const [dynamicKey, setDynamicKey] = useState("");
+	const [prCommitsRange, setPrCommitsRange] = useState<string[]>([]);
 
 	const breakpoints = {
 		auto: "630px",
@@ -805,28 +811,33 @@ export const PullRequest = () => {
 							paddingTop: "10px"
 						}}
 					>
-						<Tabs style={{ margin: "0 20px 10px 20px" }}>
+						<Tabs style={{ margin: "0 20px 10px 20px", display: "flex", flexWrap: "wrap-reverse" }}>
 							<Tab onClick={e => setActiveTab(1)} active={activeTab == 1}>
-								<Icon className="narrow-text" name="comment" />
-								<span className="wide-text">Overview</span>
-								<PRBadge>{pr.userDiscussionsCount}</PRBadge>
+								<InlineIcon>
+									<Icon className="narrow-text" name="comment" />
+									<span className="wide-text">Overview</span>
+									<PRBadge>{pr.userDiscussionsCount}</PRBadge>
+								</InlineIcon>
 							</Tab>
 							<Tab onClick={e => setActiveTab(2)} active={activeTab == 2}>
-								<Icon className="narrow-text" name="git-commit" />
-								<span className="wide-text">Commits</span>
-								<PRBadge>{(pr && pr.commitCount) || 0}</PRBadge>
+								<InlineIcon>
+									<Icon className="narrow-text" name="git-commit" />
+									<span className="wide-text">Commits</span>
+									<PRBadge>{(pr && pr.commitCount) || 0}</PRBadge>
+								</InlineIcon>
 							</Tab>
-
 							<Tab onClick={e => setActiveTab(4)} active={activeTab == 4}>
-								<Icon className="narrow-text" name="plus-minus" />
-								<span className="wide-text">Changes</span>
-								<PRBadge>
-									{(pr && pr.changesCount) || 0}
-									{pr && pr.overflow ? "+" : ""}
-								</PRBadge>
+								<InlineIcon>
+									<Icon className="narrow-text" name="plus-minus" />
+									<span className="wide-text">Changes</span>
+									<PRBadge>
+										{(pr && pr.changesCount) || 0}
+										{pr && pr.overflow ? "+" : ""}
+									</PRBadge>
+								</InlineIcon>
 							</Tab>
 							{pr.pendingReview ? (
-								<PRSubmitReviewButton>
+								<PRSubmitReviewButton style={{ margin: "-10px 0 7px auto" }}>
 									<Button variant="success" onClick={() => setFinishReviewOpen(!finishReviewOpen)}>
 										Finish<span className="wide-text"> review</span>
 										<PRBadge>
@@ -844,7 +855,7 @@ export const PullRequest = () => {
 									)}
 								</PRSubmitReviewButton>
 							) : unresolvedThreads > 0 ? (
-								<TabActions>
+								<TabActions style={{ margin: "-10px 0 7px auto" }}>
 									<PRSelectorButtons>
 										<Tooltip placement="top" title={`${unresolvedThreads} unresolved threads`}>
 											<span className="label">
@@ -883,7 +894,7 @@ export const PullRequest = () => {
 									</PRSelectorButtons>
 								</TabActions>
 							) : resolvedThreads > 0 ? (
-								<TabActions>
+								<TabActions style={{ margin: "-10px 0 7px auto" }}>
 									<PRSelectorButtons>
 										<span className="label">
 											<Icon name="check-circle" className="green-color margin-right" />
@@ -936,6 +947,8 @@ export const PullRequest = () => {
 									key={"files-changed-" + dynamicKey}
 									pr={pr as any}
 									setIsLoadingMessage={setIsLoadingMessage}
+									prCommitsRange={prCommitsRange}
+									setPrCommitsRange={setPrCommitsRange}
 								/>
 							)}
 						</>
