@@ -1,8 +1,5 @@
 "use strict";
-import { Agent as HttpsAgent } from "https";
-import * as url from "url";
 
-import HttpsProxyAgent from "https-proxy-agent";
 import {
 	commands,
 	DocumentSymbol,
@@ -10,7 +7,6 @@ import {
 	EventEmitter,
 	ExtensionContext,
 	OutputChannel,
-	Range as VSCodeRange,
 	Uri,
 	window,
 	workspace
@@ -45,7 +41,6 @@ import {
 	ArchiveStreamRequestType,
 	BaseAgentOptions,
 	BootstrapRequestType,
-	CalculateNonLocalRangesRequestType,
 	CloseStreamRequestType,
 	CodeStreamEnvironmentInfo,
 	CreateChannelStreamRequestType,
@@ -101,15 +96,12 @@ import {
 	FetchTeamsRequestType,
 	FetchUnreadStreamsRequestType,
 	FetchUsersRequestType,
-	FileLevelTelemetryRequestOptions,
-	FunctionLocator,
 	GetDocumentFromKeyBindingRequestType,
 	GetDocumentFromKeyBindingResponse,
 	GetDocumentFromMarkerRequestType,
 	GetDocumentFromMarkerResponse,
 	GetFileContentsAtRevisionRequestType,
 	GetFileContentsAtRevisionResponse,
-	GetFileLevelTelemetryRequestType,
 	GetFileScmInfoRequestType,
 	GetFileStreamRequestType,
 	GetFileStreamResponse,
@@ -122,7 +114,6 @@ import {
 	GetReviewRequestType,
 	GetStreamRequestType,
 	GetTeamRequestType,
-	GetUnreadsRequestType,
 	GetUserRequestType,
 	InviteUserRequestType,
 	JoinStreamRequestType,
@@ -154,9 +145,12 @@ import {
 	UpdateUserRequestType,
 	UserDidCommitNotification,
 	UserDidCommitNotificationType,
-	DidEncounterInvalidRefreshTokenNotificationType,
 	TelemetryEventName,
-	TelemetryData
+	TelemetryData,
+	WhatsNewNotificationType,
+	WhatsNewNotification,
+	DidChangeSessionTokenStatusNotification,
+	DidChangeSessionTokenStatusNotificationType
 } from "@codestream/protocols/agent";
 import {
 	ChannelServiceType,
@@ -174,8 +168,8 @@ import { Container } from "../container";
 import { Logger } from "../logger";
 import { Functions, log } from "../system";
 import { getInitializationOptions } from "../extension";
-import { Editor } from "../extensions";
 import { resolveStackTracePaths } from "./resolveStackTracePathsHandler";
+import { ViewColumn } from "@codestream/protocols/webview";
 
 export { BaseAgentOptions };
 
@@ -207,11 +201,6 @@ export class CodeStreamAgentConnection implements Disposable {
 		return this._onDidFailLogin.event;
 	}
 
-	private _onDidEncounterInvalidRefreshToken = new EventEmitter<void>();
-	get onDidEncounterInvalidRefreshToken(): Event<void> {
-		return this._onDidEncounterInvalidRefreshToken.event;
-	}
-
 	private _onDidRequireRestart = new EventEmitter<void>();
 	get onDidRequireRestart(): Event<void> {
 		return this._onDidRequireRestart.event;
@@ -225,6 +214,12 @@ export class CodeStreamAgentConnection implements Disposable {
 	private _onDidChangeConnectionStatus = new EventEmitter<DidChangeConnectionStatusNotification>();
 	get onDidChangeConnectionStatus(): Event<DidChangeConnectionStatusNotification> {
 		return this._onDidChangeConnectionStatus.event;
+	}
+
+	private _onDidChangeSessionTokenStatus =
+		new EventEmitter<DidChangeSessionTokenStatusNotification>();
+	get onDidChangeSessionTokenStatus(): Event<DidChangeSessionTokenStatusNotification> {
+		return this._onDidChangeSessionTokenStatus.event;
 	}
 
 	private _onDidEncounterMaintenanceMode =
@@ -319,6 +314,7 @@ export class CodeStreamAgentConnection implements Disposable {
 	private _restartCount = 0;
 	private _outputChannel: OutputChannel | undefined;
 	private _logsOutputChannel: OutputChannel | undefined;
+	private _context: ExtensionContext;
 
 	constructor(context: ExtensionContext, options: BaseAgentOptions) {
 		const env = process.env;
@@ -329,6 +325,8 @@ export class CodeStreamAgentConnection implements Disposable {
 			NODE_TLS_REJECT_UNAUTHORIZED: options.disableStrictSSL ? 0 : 1,
 			NODE_EXTRA_CA_CERTS: options.extraCerts
 		};
+
+		this._context = context;
 
 		this._serverOptions = {
 			run: {
@@ -342,7 +340,7 @@ export class CodeStreamAgentConnection implements Disposable {
 				module: context.asAbsolutePath("../shared/agent/dist/agent.js"),
 				transport: TransportKind.ipc,
 				options: {
-					execArgv: ["--nolazy", breakOnStart ? "--inspect-brk=6009" : "--inspect=6009"],
+					execArgv: ["--nolazy", breakOnStart ? "--inspect-brk=1337" : "--inspect=1337"],
 					env: agentEnv
 				}
 			}
@@ -422,10 +420,9 @@ export class CodeStreamAgentConnection implements Disposable {
 		if (this._outputChannel) {
 			this._outputChannel.dispose();
 		}
-		if (this._logsOutputChannel) {
-			this._logsOutputChannel.dispose();
-		}
+
 		this._disposable && this._disposable.dispose();
+
 		if (this._clientReadyCancellation !== undefined) {
 			this._clientReadyCancellation.dispose();
 			this._clientReadyCancellation = undefined;
@@ -535,13 +532,6 @@ export class CodeStreamAgentConnection implements Disposable {
 				repoId: marker.repoId,
 				file: marker.file,
 				markerId: marker.id
-			});
-		}
-
-		getRangesForUri(ranges: VSCodeRange[], uri: string) {
-			return this._connection.sendRequest(CalculateNonLocalRangesRequestType, {
-				ranges: Editor.toSerializableRange(ranges),
-				uri
 			});
 		}
 	})(this);
@@ -1006,35 +996,8 @@ export class CodeStreamAgentConnection implements Disposable {
 			return this._connection.sendRequest(UpdateUserRequestType, user);
 		}
 
-		unreads() {
-			return this._connection.sendRequest(GetUnreadsRequestType, {});
-		}
-
 		preferences() {
 			return this._connection.sendRequest(GetPreferencesRequestType, undefined);
-		}
-	})(this);
-
-	get observability() {
-		return this._observability;
-	}
-	private readonly _observability = new (class {
-		constructor(private readonly _connection: CodeStreamAgentConnection) {}
-
-		getFileLevelTelemetry(
-			fileUri: string,
-			languageId: string,
-			resetCache: boolean,
-			locator?: FunctionLocator,
-			options?: FileLevelTelemetryRequestOptions
-		) {
-			return this._connection.sendRequest(GetFileLevelTelemetryRequestType, {
-				fileUri,
-				languageId,
-				resetCache,
-				locator,
-				options
-			});
 		}
 	})(this);
 
@@ -1043,6 +1006,14 @@ export class CodeStreamAgentConnection implements Disposable {
 	})
 	private onConnectionStatusChanged(e: DidChangeConnectionStatusNotification) {
 		this._onDidChangeConnectionStatus.fire(e);
+	}
+
+	@log({
+		prefix: (context, e: DidChangeSessionTokenStatusNotification) =>
+			`${context.prefix}(${e.status})`
+	})
+	private onSessionTokenStatusChanged(e: DidChangeSessionTokenStatusNotification) {
+		this._onDidChangeSessionTokenStatus.fire(e);
 	}
 
 	@log({
@@ -1125,6 +1096,29 @@ export class CodeStreamAgentConnection implements Disposable {
 		await Container.sidebar.onProcessBufferChanged(e);
 	}
 
+	@log()
+	private async onWhatsNew(e: WhatsNewNotification) {
+		window
+			.showInformationMessage(
+				e.title,
+				{ title: "See What's New", isCloseAffordance: false },
+				{ title: "Dismiss", isCloseAffordance: true }
+			)
+			.then(selection => {
+				if (selection?.title === "See What's New") {
+					Container.panel.initializeOrShowEditor({
+						panelLocation: ViewColumn.Active,
+						panel: "whatsnew",
+						title: "What's New",
+						entryPoint: "notification",
+						ide: {
+							name: "VSC"
+						}
+					});
+				}
+			});
+	}
+
 	@started
 	async sendNotification<NT extends NotificationType<any, any>>(
 		type: NT,
@@ -1172,6 +1166,41 @@ export class CodeStreamAgentConnection implements Disposable {
 		}
 	}
 
+	sendRawRequest<R>(
+		method:
+			| "textDocument/documentSymbol"
+			| "textDocument/didOpen"
+			| "textDocument/didChange"
+			| "textDocument/willSave"
+			| "textDocument/willSaveWaitUntil"
+			| "textDocument/didSave"
+			| "textDocument/didClose"
+			| "textDocument/publishDiagnostics"
+			| "textDocument/completion"
+			| "completionItem/resolve"
+			| "textDocument/hover"
+			| "textDocument/signatureHelp"
+			| "textDocument/references"
+			| "textDocument/documentHighlight"
+			| "workspace/symbol"
+			| "workspace/executeCommand"
+			| "workspace/configuration"
+			| "initialize"
+			| "initialized"
+			| "shutdown"
+			| "exit"
+			| "workspace/applyEdit",
+		param: any,
+		token?: CancellationToken
+	): Thenable<R> {
+		try {
+			return this._client!.sendRequest(method, param, token);
+		} catch (ex) {
+			Logger.error(ex, `AgentConnection.sendRawRequest(${method})`);
+			throw ex;
+		}
+	}
+
 	private async ensureStartingCompleted(): Promise<void> {
 		if (this._starting === undefined) return;
 
@@ -1203,8 +1232,6 @@ export class CodeStreamAgentConnection implements Disposable {
 		this._clientOptions.outputChannel = this._outputChannel =
 			window.createOutputChannel("CodeStream (Agent)");
 		this._clientOptions.revealOutputChannelOn = RevealOutputChannelOn.Never;
-
-		this._logsOutputChannel = window.createOutputChannel("New Relic Logs");
 
 		const initializationOptions = getInitializationOptions({
 			...this._clientOptions.initializationOptions
@@ -1292,6 +1319,10 @@ export class CodeStreamAgentConnection implements Disposable {
 			this.onConnectionStatusChanged.bind(this)
 		);
 		this._client.onNotification(
+			DidChangeSessionTokenStatusNotificationType,
+			this.onSessionTokenStatusChanged.bind(this)
+		);
+		this._client.onNotification(
 			DidChangeDocumentMarkersNotificationType,
 			this.onDocumentMarkersChanged.bind(this)
 		);
@@ -1315,9 +1346,7 @@ export class CodeStreamAgentConnection implements Disposable {
 		this._client.onNotification(DidLoginNotificationType, e => this._onDidLogin.fire(e));
 		this._client.onNotification(DidStartLoginNotificationType, () => this._onDidStartLogin.fire());
 		this._client.onNotification(DidFailLoginNotificationType, () => this._onDidFailLogin.fire());
-		this._client.onNotification(DidEncounterInvalidRefreshTokenNotificationType, () =>
-			this._onDidEncounterInvalidRefreshToken.fire()
-		);
+
 		this._client.onNotification(DidLogoutNotificationType, this.onLogout.bind(this));
 		this._client.onNotification(RestartRequiredNotificationType, () => {
 			this._onDidRequireRestart.fire();
@@ -1360,6 +1389,9 @@ export class CodeStreamAgentConnection implements Disposable {
 		this._client.onNotification(DidChangeCodelensesNotificationType, e =>
 			this._onDidChangeCodelenses.fire(e)
 		);
+		this._client.onNotification(WhatsNewNotificationType, e => {
+			this.onWhatsNew(e);
+		});
 		this._client.onRequest(AgentOpenUrlRequestType, e => this._onOpenUrl.fire(e));
 
 		this._client.onRequest(AgentValidateLanguageExtensionRequestType, async request => {
@@ -1425,68 +1457,12 @@ export class CodeStreamAgentConnection implements Disposable {
 			this._outputChannel.dispose();
 		}
 
-		if (this._logsOutputChannel) {
-			this._logsOutputChannel.dispose();
-		}
-
 		if (this._client === undefined) return;
 		this._disposable && this._disposable.dispose();
 		await Functions.cancellable(this._client.stop(), 30000, { onDidCancel: resolve => resolve() });
 
 		this._starting = undefined;
 		this._client = undefined;
-	}
-
-	private getHttpsProxyAgent(options: {
-		proxySupport?: string;
-		proxy?: {
-			url: string;
-			strictSSL?: boolean;
-		};
-	}) {
-		let _httpsAgent: HttpsAgent | HttpsProxyAgent | undefined = undefined;
-		const redactProxyPasswdRegex = /(http:\/\/.*:)(.*)(@.*)/gi;
-		if (
-			options.proxySupport === "override" ||
-			(options.proxySupport == null && options.proxy != null)
-		) {
-			if (options.proxy != null) {
-				const redactedUrl = options.proxy.url.replace(redactProxyPasswdRegex, "$1*****$3");
-				Logger.log(
-					`Proxy support is in override with url=${redactedUrl}, strictSSL=${options.proxy.strictSSL}`
-				);
-				_httpsAgent = new HttpsProxyAgent({
-					...url.parse(options.proxy.url),
-					rejectUnauthorized: options.proxy.strictSSL
-				} as any);
-			} else {
-				Logger.log("Proxy support is in override, but no proxy settings were provided");
-			}
-		} else if (options.proxySupport === "on") {
-			const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
-			if (proxyUrl) {
-				const strictSSL = options.proxy ? options.proxy.strictSSL : true;
-				const redactedUrl = proxyUrl.replace(redactProxyPasswdRegex, "$1*****$3");
-				Logger.log(`Proxy support is on with url=${redactedUrl}, strictSSL=${strictSSL}`);
-
-				let proxyUri;
-				try {
-					proxyUri = url.parse(proxyUrl);
-				} catch {}
-
-				if (proxyUri) {
-					_httpsAgent = new HttpsProxyAgent({
-						...proxyUri,
-						rejectUnauthorized: options.proxy ? options.proxy.strictSSL : true
-					} as any);
-				}
-			} else {
-				Logger.log("Proxy support is on, but no proxy url was found");
-			}
-		} else {
-			Logger.log("Proxy support is off");
-		}
-		return _httpsAgent;
 	}
 
 	public setServerUrl(url: string) {

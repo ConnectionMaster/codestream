@@ -28,6 +28,7 @@ import { Logger, TraceLevel } from "./logger";
 import { FileSystem, Strings, Versions } from "./system";
 import * as TokenManager from "./api/tokenManager";
 import { SaveTokenReason } from "./api/tokenManager";
+import { EntityEditorDecorationProvider } from "./providers/entityEditorDecorationProvider";
 
 const extension = extensions.getExtension(extensionQualifiedId);
 export const extensionVersion = extension?.packageJSON?.version ?? "1.0.0";
@@ -40,9 +41,21 @@ interface BuildInfoMetadata {
 export const IDE_NAME = "VS Code";
 
 const serverUrlMigrations: { [url: string]: string } = {
-	"https://staging-api.codestream.us": "https://codestream-stg.staging-service.newrelic.com",
-	"https://api.codestream.com": "https://codestream-us1.service.newrelic.com",
-	"https://eu-api.codestream.com": "https://codestream-eu1.service.eu.newrelic.com"
+	"https://staging-api.codestream.us": "https://codestream-api-v2-stg.staging-service.nr-ops.net",
+	"https://api.codestream.com": "https://codestream-api-v2-us1.service.newrelic.com",
+	"https://eu-api.codestream.com": "https://codestream-api-v2-eu1.service.eu.newrelic.com",
+	"https://codestream-pd.staging-service.nr-ops.net":
+		"https://codestream-api-v2-pd.staging-service.nr-ops.net",
+	"https://codestream-qa.staging-service.nr-ops.net":
+		"https://codestream-api-v2-qa.staging-service.nr-ops.net",
+	"https://codestream.eu.service.newrelic.com":
+		"https://codestream-api-v2-eu1.service.eu.newrelic.com",
+	"https://codestream-us1.service.newrelic.com":
+		"https://codestream-api-v2-us1.service.newrelic.com",
+	"https://codestream-eu1.service.eu.newrelic.com":
+		"https://codestream-api-v2-eu1.service.eu.newrelic.com",
+	"https://codestream-stg.staging-service.newrelic.com":
+		"https://codestream-api-v2-stg.staging-service.nr-ops.net"
 };
 
 export async function activate(context: ExtensionContext) {
@@ -188,6 +201,14 @@ export async function activate(context: ExtensionContext) {
 	}
 
 	context.globalState.update(GlobalState.Version, extensionVersion);
+	context.subscriptions.push(
+		new EntityEditorDecorationProvider(
+			Container.agent,
+			Container.session,
+			configuration,
+			() => Container.config
+		)
+	);
 
 	Logger.log(
 		`CodeStream${editionFormat} v${formattedVersion} started \u2022 ${Strings.getDurationMilliseconds(

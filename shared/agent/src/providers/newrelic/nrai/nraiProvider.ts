@@ -3,13 +3,14 @@ import { log } from "../../../system/decorators/log";
 import { NewRelicGraphqlClient } from "../newRelicGraphqlClient";
 import { GetNewRelicAIEligibilityRequestType } from "@codestream/protocols/agent";
 import { Logger } from "../../../logger";
+import { Disposable } from "vscode-languageserver";
 
 @lsp
-export class NraiProvider {
+export class NraiProvider implements Disposable {
 	constructor(private graphqlClient: NewRelicGraphqlClient) {}
 
 	@lspHandler(GetNewRelicAIEligibilityRequestType)
-	@log({ timed: true })
+	@log()
 	async getAIEligibility(): Promise<boolean> {
 		const ffOverrideQuery = `query getAIFeatureFlag {
 			currentUser {
@@ -64,4 +65,6 @@ export class NraiProvider {
 			return false;
 		}
 	}
+
+	dispose(): void {}
 }

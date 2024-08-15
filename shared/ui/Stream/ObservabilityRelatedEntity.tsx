@@ -14,7 +14,7 @@ import { HealthIcon } from "@codestream/webview/src/components/HealthIcon";
 import { HostApi } from "@codestream/webview/webview-api";
 import { PaneNodeName } from "../src/components/Pane";
 import { useDidMount, useInterval } from "../utilities/hooks";
-import { ALERT_SEVERITY_COLORS } from "./CodeError/index";
+import { ALERT_SEVERITY_COLORS } from "./CodeError/CodeError.Types";
 import Icon from "./Icon";
 import { ObservabilityGoldenMetricDropdown } from "./ObservabilityGoldenMetricDropdown";
 import { ObservabilityAlertViolations } from "./ObservabilityAlertViolations";
@@ -42,7 +42,7 @@ export const ObservabilityRelatedEntity = React.memo((props: Props) => {
 
 	useEffect(() => {
 		if (expanded) {
-			HostApi.instance.track("codestream/related_service clicked", {
+			HostApi.instance.track("codestream/related_service_link clicked", {
 				entity_guid: relatedEntity.guid,
 				account_id: accountId,
 				target: "related_service",
@@ -53,11 +53,15 @@ export const ObservabilityRelatedEntity = React.memo((props: Props) => {
 		}
 	}, [expanded]);
 
-	useInterval(() => {
-		if (expanded) {
-			fetchGoldenMetrics(relatedEntity.guid);
-		}
-	}, 300000);
+	useInterval(
+		() => {
+			if (expanded) {
+				fetchGoldenMetrics(relatedEntity.guid);
+			}
+		},
+		300000,
+		true
+	);
 
 	const fetchNewRelicUrl = async (entityGuid?: string | null) => {
 		if (entityGuid) {
@@ -138,7 +142,7 @@ export const ObservabilityRelatedEntity = React.memo((props: Props) => {
 						onClick={e => {
 							e.preventDefault();
 							e.stopPropagation();
-							HostApi.instance.track("codestream/link_to_newrelic clicked", {
+							HostApi.instance.track("codestream/newrelic_link clicked", {
 								entity_guid: props.relatedEntity.guid,
 								account_id: props.accountId,
 								meta_data: "destination: apm_service_summary",
@@ -156,7 +160,7 @@ export const ObservabilityRelatedEntity = React.memo((props: Props) => {
 				<>
 					<ObservabilityAlertViolations
 						issues={recentIssues?.recentIssues}
-						customPadding={"2px 10px 2px 55px"}
+						customPadding={"2px 10px 2px 65px"}
 						entityGuid={relatedEntity.guid}
 					/>
 					<ObservabilityGoldenMetricDropdown
@@ -165,6 +169,7 @@ export const ObservabilityRelatedEntity = React.memo((props: Props) => {
 						loadingGoldenMetrics={loadingGoldenMetrics}
 						noDropdown={true}
 						entityGuid={relatedEntity.guid}
+						accountId={props.accountId}
 					/>
 				</>
 			)}

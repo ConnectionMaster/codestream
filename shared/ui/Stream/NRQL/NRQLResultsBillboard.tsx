@@ -1,24 +1,38 @@
 import React from "react";
 import { NRQLResult } from "@codestream/protocols/agent";
 import styled from "styled-components";
+import { validateAndConvertUnixTimestamp } from "./utils";
 
 const BillboardValueWrapper = styled.div`
 	margin: 10px;
 `;
 
 const BillboardValue = styled.div`
-	font-size: 15em;
+	font-size: 20vw;
 	font-weight: normal;
 	margin: 0;
 	line-height: 1;
 `;
 
-export const NRQLResultsBillboard = (props: { results: NRQLResult[]; eventType?: string }) => {
-	let firstResult = props.results[0];
-	let onlyKey = Object.keys(firstResult)[0];
-	const value = firstResult[onlyKey];
+const BillboardValueType = styled.div`
+	font-size: 8vw;
+`;
 
-	const formatLargeNumber = number => {
+interface Props {
+	results: NRQLResult[];
+	// Name of the collection
+	eventType?: string;
+	hasAlias: boolean;
+}
+
+export const NRQLResultsBillboard = (props: Props) => {
+	const { results, eventType, hasAlias } = props;
+
+	const formatLargeNumber = (number, isTimestamp) => {
+		if (isTimestamp) {
+			return validateAndConvertUnixTimestamp(number, true);
+		}
+
 		const units = ["K", "M", "B", "T"];
 
 		let roundedNumber = number;
@@ -39,12 +53,31 @@ export const NRQLResultsBillboard = (props: { results: NRQLResult[]; eventType?:
 		return `${roundedNumber} ${unit}`;
 	};
 
+	const hasTimestampKey = str => {
+		if (str.includes("timestamp")) {
+			return true;
+		}
+		return false;
+	};
+
+	const firstResult = results[0];
+	const onlyKey = Object.keys(firstResult)[0];
+	const isTimestamp = hasTimestampKey(onlyKey);
+	const value = firstResult[onlyKey];
+	const formattedValue = typeof value === "number" ? formatLargeNumber(value, isTimestamp) : value;
+	const eventTypeText =
+		eventType && !isTimestamp && (hasAlias ? onlyKey : eventType).replace(/_/g, " ");
+
 	return (
 		<BillboardValueWrapper>
-			<BillboardValue>
-				{typeof value === "number" ? formatLargeNumber(value) : value}
-			</BillboardValue>
-			{props.eventType && <div>{props.eventType.replace(/_/g, " ")}</div>}
+			<BillboardValue title={value}>{formattedValue}</BillboardValue>
+			{eventTypeText && (
+				<BillboardValueType>
+					{eventTypeText}
+					{typeof value === "number" && value > 1 && "s"}
+				</BillboardValueType>
+			)}
+			{eventType && isTimestamp && <BillboardValueType>Timestamp</BillboardValueType>}
 		</BillboardValueWrapper>
 	);
 };

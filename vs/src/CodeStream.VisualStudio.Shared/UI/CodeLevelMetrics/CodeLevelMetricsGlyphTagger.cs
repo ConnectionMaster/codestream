@@ -13,12 +13,12 @@ using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
 using Microsoft;
 using CodeStream.VisualStudio.Core.Extensions;
+using CodeStream.VisualStudio.Core.Models;
 
 namespace CodeStream.VisualStudio.Shared.UI.CodeLevelMetrics
 {
 	internal class CodeLevelMetricsGlyphTagger : ITagger<CodeLevelMetricsGlyph>
 	{
-		private readonly IServiceProvider _serviceProvider;
 		private readonly ICodeStreamAgentService _codeStreamAgentService;
 		private readonly ISessionService _sessionService;
 		private readonly IVsSolution _vsSolution;
@@ -29,7 +29,6 @@ namespace CodeStream.VisualStudio.Shared.UI.CodeLevelMetrics
 			ISessionService sessionService
 		)
 		{
-			_serviceProvider = serviceProvider;
 			_codeStreamAgentService = codeStreamAgentService;
 			_sessionService = sessionService;
 			_vsSolution = serviceProvider.GetService(typeof(SVsSolution)) as IVsSolution;
@@ -56,20 +55,9 @@ namespace CodeStream.VisualStudio.Shared.UI.CodeLevelMetrics
 			var root = tree.GetCompilationUnitRoot();
 			var solution = new Uri(_vsSolution.GetSolutionFile());
 
-			// uses Microsoft.CodeAnalysis.*
-#if X86
-			// VS2019 won't handle file-scoped namespaces because of
-			// specific assembly versions we are tied to
-			var namespaceDeclarations = root.DescendantNodes()
-				.OfType<NamespaceDeclarationSyntax>()
-				.ToList();
-#elif X64
-			// VS2022+ can handle both types since we can use a newer
-			// version of the assemblies
 			var namespaceDeclarations = root.DescendantNodes()
 				.OfType<BaseNamespaceDeclarationSyntax>()
 				.ToList();
-#endif
 
 			foreach (var namespaceDeclaration in namespaceDeclarations)
 			{
@@ -103,61 +91,72 @@ namespace CodeStream.VisualStudio.Shared.UI.CodeLevelMetrics
 
 					foreach (var methodDeclaration in methodDeclarations)
 					{
-						var namespaceFunction =
+						var fullyQualifiedFunctionName =
 							$"{namespaceDeclaration.Name}.{classDeclaration.Identifier}.{methodDeclaration.Identifier}";
 
 						var avgDuration = classMetrics?.AverageDuration?.SingleOrDefault(
 							x =>
 								$"{x.Namespace}.{x.ClassName}.{x.FunctionName}".EqualsIgnoreCase(
-									namespaceFunction
+									fullyQualifiedFunctionName
 								)
 								|| $"{x.Namespace}.{x.FunctionName}".EqualsIgnoreCase(
-									namespaceFunction
+									fullyQualifiedFunctionName
 								)
 						);
 						var errors = classMetrics?.ErrorRate?.SingleOrDefault(
 							x =>
 								$"{x.Namespace}.{x.ClassName}.{x.FunctionName}".EqualsIgnoreCase(
-									namespaceFunction
+									fullyQualifiedFunctionName
 								)
 								|| $"{x.Namespace}.{x.FunctionName}".EqualsIgnoreCase(
-									namespaceFunction
+									fullyQualifiedFunctionName
 								)
 						);
 						var sampleSize = classMetrics?.SampleSize?.SingleOrDefault(
 							x =>
 								$"{x.Namespace}.{x.ClassName}.{x.FunctionName}".EqualsIgnoreCase(
-									namespaceFunction
+									fullyQualifiedFunctionName
 								)
 								|| $"{x.Namespace}.{x.FunctionName}".EqualsIgnoreCase(
-									namespaceFunction
+									fullyQualifiedFunctionName
 								)
 						);
 
-						if (string.IsNullOrEmpty(sampleSize?.SampleSize))
+						if (
+							(sampleSize is null && avgDuration is null && errors is null)
+							|| sampleSize?.SampleSize == 0
+						)
 						{
 							continue;
 						}
 
-						var methodStartLine = methodDeclaration.Identifier
-							.GetLocation()
-							.GetLineSpan()
-							.StartLinePosition.Line;
+						var lineSpan = methodDeclaration.Identifier.GetLocation().GetLineSpan();
+						var methodStartLine = lineSpan.StartLinePosition.Line;
 
 						var line = snapshot.GetLineFromLineNumber(methodStartLine);
 						var glyphSpan = new SnapshotSpan(snapshot, line.Start, line.Length);
 
+						var methodRange = new Range
+						{
+							Start = new Position(
+								lineSpan.StartLinePosition.Line,
+								lineSpan.StartLinePosition.Character
+							),
+							End = new Position(
+								lineSpan.EndLinePosition.Line,
+								lineSpan.EndLinePosition.Character
+							)
+						};
+
 						yield return new TagSpan<CodeLevelMetricsGlyph>(
 							glyphSpan,
 							new CodeLevelMetricsGlyph(
-								namespaceFunction,
 								methodDeclaration.Identifier.ToString(),
-								classMetrics?.SinceDateFormatted,
-								classMetrics?.NewRelicEntityGuid,
-								classMetrics?.Repo,
+								classMetrics,
 								avgDuration,
 								errors,
-								sampleSize
+								sampleSize,
+								methodRange
 							)
 						);
 					}

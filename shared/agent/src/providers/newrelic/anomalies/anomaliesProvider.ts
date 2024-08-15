@@ -1,4 +1,6 @@
 import {
+	DetectTeamAnomaliesRequest,
+	DetectTeamAnomaliesRequestType,
 	DidChangeCodelensesNotificationType,
 	GetObservabilityAnomaliesRequest,
 	GetObservabilityAnomaliesRequestType,
@@ -13,7 +15,7 @@ import { Logger } from "../../../logger";
 import { Functions } from "../../../system/function";
 import Cache from "@codestream/utils/system/timedCache";
 import { SessionContainer } from "../../../container";
-import { DEFAULT_CLM_SETTINGS } from "@codestream/protocols/api";
+import { CSAccessTokenType, DEFAULT_CLM_SETTINGS } from "@codestream/protocols/api";
 import { CodeStreamAgent } from "../../../agent";
 import { ReposProvider } from "../repos/reposProvider";
 import { NewRelicGraphqlClient } from "../newRelicGraphqlClient";
@@ -23,6 +25,9 @@ import { EntityAccountResolver } from "../clm/entityAccountResolver";
 import { Disposable } from "../../../system/disposable";
 import wait = Functions.wait;
 import { AnomalyDetectorDrillDown } from "../anomalyDetectionDrillDown";
+import { FetchCore } from "../../../system/fetchCore";
+import { tokenHolder } from "../TokenHolder";
+import { getAnomalyDetectionMockResponse } from "../anomalyDetectionMockResults";
 
 @lsp
 export class AnomaliesProvider implements Disposable {
@@ -42,20 +47,29 @@ export class AnomaliesProvider implements Disposable {
 		private entityAccountResolver: EntityAccountResolver,
 		private reposProvider: ReposProvider,
 		private graphqlClient: NewRelicGraphqlClient,
-		private deploymentsProvider: DeploymentsProvider
+		private deploymentsProvider: DeploymentsProvider,
+		private fetchClient: FetchCore
 	) {
 		this.init();
 	}
 
 	private init() {
-		this._pollObservabilityAnomaliesTimeout = setTimeout(
-			this.pollObservabilityAnomalies.bind(this),
-			2 * 60 * 1000
-		);
+		// this._pollObservabilityAnomaliesTimeout = setTimeout(
+		// 	this.pollObservabilityAnomalies.bind(this),
+		// 	2 * 60 * 1000
+		// );
 	}
 
 	getLastObservabilityAnomaliesResponse(entityGuid: string) {
-		return this._lastObservabilityAnomaliesResponse.get(entityGuid);
+		const mockResponse = getAnomalyDetectionMockResponse(entityGuid);
+		if (mockResponse) return mockResponse;
+		const result = SessionContainer.instance().session.getCachedAnomalyData(entityGuid);
+		return (
+			result && {
+				responseTime: result.durationAnomalies,
+				errorRate: result.errorRateAnomalies,
+			}
+		);
 	}
 
 	private observabilityAnomaliesCacheKey(request: GetObservabilityAnomaliesRequest): string {
@@ -64,7 +78,7 @@ export class AnomaliesProvider implements Disposable {
 			request.sinceDaysAgo,
 			request.baselineDays,
 			request.sinceLastRelease,
-			request.minimumErrorRate,
+			request.minimumErrorPercentage,
 			request.minimumResponseTime,
 			request.minimumSampleRate,
 			request.minimumRatio,
@@ -72,9 +86,7 @@ export class AnomaliesProvider implements Disposable {
 	}
 
 	@lspHandler(GetObservabilityAnomaliesRequestType)
-	@log({
-		timed: true,
-	})
+	@log()
 	async getObservabilityAnomalies(
 		request: GetObservabilityAnomaliesRequest
 	): Promise<GetObservabilityAnomaliesResponse> {
@@ -83,7 +95,6 @@ export class AnomaliesProvider implements Disposable {
 			const cached = await this._observabilityAnomaliesTimedCache.get(cacheKey);
 			if (cached) {
 				this._lastObservabilityAnomaliesResponse.set(request.entityGuid, cached);
-				this.agent.sendNotification(DidChangeCodelensesNotificationType, undefined);
 				return cached;
 			}
 		} catch (e) {
@@ -95,7 +106,12 @@ export class AnomaliesProvider implements Disposable {
 		let lastEx;
 		const fn = async () => {
 			try {
-				const anomalyDetector = new AnomalyDetectorDrillDown(request, this.deploymentsProvider, this.graphqlClient, this.reposProvider);
+				const anomalyDetector = new AnomalyDetectorDrillDown(
+					request,
+					this.deploymentsProvider,
+					this.graphqlClient,
+					this.reposProvider
+				);
 				const promise = anomalyDetector.execute();
 				this._observabilityAnomaliesTimedCache.put(cacheKey, promise);
 				const response = await promise;
@@ -122,9 +138,7 @@ export class AnomaliesProvider implements Disposable {
 	}
 
 	@lspHandler(GetObservabilityResponseTimesRequestType)
-	@log({
-		timed: true,
-	})
+	@log()
 	getObservabilityResponseTimes(
 		request: GetObservabilityResponseTimesRequest
 	): Promise<GetObservabilityResponseTimesResponse> {
@@ -209,7 +223,7 @@ export class AnomaliesProvider implements Disposable {
 					sinceDaysAgo: parseInt(clmSettings.compareDataLastValue),
 					baselineDays: parseInt(clmSettings.againstDataPrecedingValue),
 					sinceLastRelease: clmSettings.compareDataLastReleaseValue,
-					minimumErrorRate: parseFloat(clmSettings.minimumErrorRateValue),
+					minimumErrorPercentage: parseFloat(clmSettings.minimumErrorPercentage),
 					minimumResponseTime: parseFloat(clmSettings.minimumAverageDurationValue),
 					minimumSampleRate: parseFloat(clmSettings.minimumBaselineValue),
 					minimumRatio: parseFloat(clmSettings.minimumChangeValue) / 100 + 1,
@@ -224,6 +238,27 @@ export class AnomaliesProvider implements Disposable {
 		} catch (e) {
 			Logger.warn("pollObservabilityAnomaliesCore error", e);
 		}
+	}
+
+	@lspHandler(DetectTeamAnomaliesRequestType)
+	@log()
+	async detectTeamAnomalies(request: DetectTeamAnomaliesRequest) {
+		const me = await SessionContainer.instance().users.getMe();
+		const url = SessionContainer.instance().session.o11yServerUrl;
+		const tokenHeader =
+			tokenHolder.tokenType === CSAccessTokenType.ACCESS_TOKEN ? "x-access-token" : "x-id-token";
+		const token = tokenHolder.accessToken;
+		const teamId = me?.teamIds[0];
+		if (!url || !token || !me || !teamId) return {};
+
+		let headers: { [key: string]: string } = {
+			"Content-Type": "application/json",
+			[tokenHeader]: token,
+		};
+		return this.fetchClient.customFetch(`${url}/detect/${teamId}`, {
+			method: "post",
+			headers,
+		});
 	}
 
 	/*

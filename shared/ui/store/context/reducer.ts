@@ -26,7 +26,6 @@ const initialState: ContextState = {
 	issueProvider: undefined,
 	threadId: undefined,
 	currentRepo: undefined,
-	onboardStep: 0,
 
 	panelStack: [WebviewPanels.LandingRedirect],
 
@@ -51,9 +50,9 @@ const initialState: ContextState = {
 	errorsInboxOptions: undefined,
 	currentInstrumentation: undefined,
 	currentPixieDynamicLoggingOptions: undefined,
-	wantNewRelicOptions: undefined,
 	currentPullRequestNeedsRefresh: { needsRefresh: false, providerId: "", pullRequestId: "" },
 	entityAccounts: [],
+	currentServiceSearchEntity: undefined,
 };
 
 export function reduceContext(
@@ -132,11 +131,11 @@ export function reduceContext(
 			return { ...state, currentReviewId: action.payload.reviewId };
 		case ContextActionsType.SetCurrentReviewOptions:
 			return { ...state, currentReviewOptions: action.payload.options };
-		case ContextActionsType.SetCurrentCodeError:
+		case ContextActionsType.SetCurrentCodeErrorData:
 			return {
 				...state,
-				currentCodeErrorId: action.payload.codeErrorId,
 				currentCodeErrorData: action.payload.data,
+				currentCodeErrorGuid: action.payload.errorGuid,
 			};
 		case ContextActionsType.SetCurrentRepo:
 			return {
@@ -210,22 +209,20 @@ export function reduceContext(
 				currentInstrumentation: action.payload.options,
 			};
 		}
+		case ContextActionsType.SetCurrentServiceSearchEntity: {
+			return {
+				...state,
+				currentServiceSearchEntity: action.payload.entityGuid,
+			};
+		}
 		case ContextActionsType.SetCurrentPixieDynamicLoggingOptions: {
 			return {
 				...state,
 				currentPixieDynamicLoggingOptions: action.payload.options,
 			};
 		}
-		case ContextActionsType.SetWantNewRelicOptions: {
-			return {
-				...state,
-				wantNewRelicOptions: action.payload,
-			};
-		}
 		case ContextActionsType.SetStartWorkCard:
 			return { ...state, startWorkCard: action.payload.card };
-		case ContextActionsType.SetOnboardStep:
-			return { ...state, onboardStep: action.payload.step };
 		case ContextActionsType.SetProfileUser:
 			return { ...state, profileUserId: action.payload };
 		case ContextActionsType.SetShowFeedbackSmiley:
@@ -292,6 +289,13 @@ export function reduceContext(
 			return {
 				...state,
 				entityAccounts: action.payload.entityAccounts,
+			};
+		}
+
+		case ContextActionsType.SetCurrentEntityGuid: {
+			return {
+				...state,
+				currentEntityGuid: action.payload.entityGuid,
 			};
 		}
 

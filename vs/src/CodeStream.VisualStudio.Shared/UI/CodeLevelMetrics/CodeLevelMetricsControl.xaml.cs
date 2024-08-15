@@ -11,6 +11,7 @@ using CodeStream.VisualStudio.Shared.Packages;
 using CodeStream.VisualStudio.Shared.Services;
 
 using Microsoft.VisualStudio.ComponentModelHost;
+using Microsoft.VisualStudio.Package;
 using Microsoft.VisualStudio.Shell;
 
 using Serilog;
@@ -58,9 +59,13 @@ namespace CodeStream.VisualStudio.Shared.UI.CodeLevelMetrics
 						var toolWindowProvider =
 							Package.GetGlobalService(typeof(SToolWindowProvider))
 							as IToolWindowProvider;
-						if (!toolWindowProvider?.IsVisible(Guids.WebViewToolWindowGuid) ?? false)
+						if (!toolWindowProvider?.IsVisible(Guids.SidebarControlWindowGuid) ?? false)
 						{
-							if (!toolWindowProvider.ShowToolWindowSafe(Guids.WebViewToolWindowGuid))
+							if (
+								!toolWindowProvider.ShowToolWindowSafe(
+									Guids.SidebarControlWindowGuid
+								)
+							)
 							{
 								Log.Warning("Could not activate tool window");
 							}
@@ -69,10 +74,7 @@ namespace CodeStream.VisualStudio.Shared.UI.CodeLevelMetrics
 						if (_sessionService.WebViewDidInitialize == true)
 						{
 							_ = _codeStreamService.ViewMethodLevelTelemetryNotificationAsync(
-								dataContext.Repo,
-								dataContext.FunctionName,
-								dataContext.NewRelicEntityGuid,
-								dataContext.MetricTimesliceNameMapping
+								dataContext
 							);
 						}
 						else
@@ -89,10 +91,7 @@ namespace CodeStream.VisualStudio.Shared.UI.CodeLevelMetrics
 									{
 										_ =
 											_codeStreamService.ViewMethodLevelTelemetryNotificationAsync(
-												dataContext.Repo,
-												dataContext.FunctionName,
-												dataContext.NewRelicEntityGuid,
-												dataContext.MetricTimesliceNameMapping
+												dataContext
 											);
 										d?.Dispose();
 									}

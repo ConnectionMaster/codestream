@@ -4,10 +4,10 @@ import React, { useState } from "react";
 import { logError } from "../logger";
 import { useRequestType } from "../utilities/hooks";
 import { mapOrder } from "../utils";
-import { ALERT_SEVERITY_SORTING_ORDER } from "./CodeError/index";
+import { ALERT_SEVERITY_SORTING_ORDER } from "./CodeError/CodeError.Types";
 import { Row } from "./CrossPostIssueControls/IssuesPane";
 import Icon from "./Icon";
-import { ErrorRow } from "./Observability";
+import { ErrorRow } from "./ErrorRow";
 import { ObservabilityRelatedEntity } from "./ObservabilityRelatedEntity";
 import { ObservabilityRelatedSearch } from "./ObservabilityRelatedSearch";
 import { ObservabilityLoadingRelatedServiceEntities } from "@codestream/webview/Stream/ObservabilityLoading";
@@ -44,7 +44,7 @@ export const ObservabilityRelatedCalledBy = React.memo((props: Props) => {
 		<>
 			<Row
 				style={{
-					padding: "2px 10px 2px 40px",
+					padding: "2px 10px 2px 50px",
 				}}
 				className={"pr-row"}
 				onClick={() => setExpanded(!expanded)}

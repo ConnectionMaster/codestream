@@ -28,10 +28,8 @@ import {
 } from "@codestream/webview/ipc/host.protocol";
 import { LoadingMessage } from "@codestream/webview/src/components/LoadingMessage";
 import { CodeStreamState } from "@codestream/webview/store";
-import {
-	closeAllPanels,
-	setCurrentMethodLevelTelemetry,
-} from "@codestream/webview/store/context/actions";
+import { setCurrentMethodLevelTelemetry } from "@codestream/webview/store/context/actions";
+import { closeAllPanels } from "@codestream/webview/store/context/thunks";
 import { CurrentMethodLevelTelemetry } from "@codestream/webview/store/context/types";
 import { useDidMount, usePrevious } from "@codestream/webview/utilities/hooks";
 import { HostApi } from "@codestream/webview/webview-api";
@@ -53,7 +51,7 @@ import {
 	RubyPluginLanguageServer,
 } from "./MissingExtension";
 import { MetaLabel } from "../Codemark/BaseCodemark";
-import { ErrorRow } from "../Observability";
+import { ErrorRow } from "../ErrorRow";
 import { openErrorGroup } from "@codestream/webview/store/codeErrors/thunks";
 
 const Root = styled.div``;
@@ -145,7 +143,7 @@ export const MethodLevelTelemetryPanel = () => {
 	};
 
 	useDidMount(() => {
-		HostApi.instance.track("codestream/codelense clicked", {
+		HostApi.instance.track("codestream/codelens_link clicked", {
 			account_id: derivedState.currentMethodLevelTelemetry?.newRelicAccountId,
 			entity_guid: derivedState.currentMethodLevelTelemetry?.newRelicEntityGuid,
 			target: "codelens",
@@ -375,13 +373,13 @@ export const MethodLevelTelemetryPanel = () => {
 														<Link
 															onClick={e => {
 																e.preventDefault();
-																HostApi.instance.track("codestream/link_to_newrelic clicked", {
+																HostApi.instance.track("codestream/newrelic_link clicked", {
 																	entity_guid:
 																		derivedState.currentMethodLevelTelemetry.newRelicEntityGuid,
 																	account_id:
 																		derivedState.currentMethodLevelTelemetry.newRelicAccountId,
 																	meta_data: "destination: apm_service_summary",
-																	meta_data_2: `codestream_section: code_level_metrics`,
+																	meta_data_2: `codestream_section: clm_details`,
 																	event_type: "click",
 																});
 																HostApi.instance.send(OpenUrlRequestType, {
@@ -430,17 +428,26 @@ export const MethodLevelTelemetryPanel = () => {
 																		{ errorGroupGuid: _.errorGroupGuid }
 																	)) as GetObservabilityErrorGroupMetadataResponse;
 																	dispatch(
-																		openErrorGroup(_.errorGroupGuid, _.occurrenceId, {
-																			multipleRepos: response?.relatedRepos?.length > 1,
-																			relatedRepos: response?.relatedRepos || undefined,
-																			timestamp: _.lastOccurrence,
-																			sessionStart: derivedState.sessionStart,
-																			pendingEntityId: response?.entityId || _.entityId,
-																			occurrenceId: response?.occurrenceId || _.occurrenceId,
-																			pendingErrorGroupGuid: _.errorGroupGuid,
-																			openType: "CLM Details",
-																			remote: _?.remote || undefined,
-																			stackSourceMap: response?.stackSourceMap,
+																		openErrorGroup({
+																			errorGroupGuid: _.errorGroupGuid,
+																			occurrenceId: _.occurrenceId,
+																			data: {
+																				multipleRepos: response?.relatedRepos?.length > 1,
+																				relatedRepos: response?.relatedRepos || undefined,
+																				timestamp: _.lastOccurrence,
+																				sessionStart: derivedState.sessionStart,
+																				occurrenceId: response?.occurrenceId || _.occurrenceId,
+																				openType: "CLM Details",
+																				remote: _?.remote || undefined,
+																				stackSourceMap: response?.stackSourceMap,
+																				errorGroupGuid: _.errorGroupGuid,
+																				accountId:
+																					derivedState.currentMethodLevelTelemetry
+																						.newRelicAccountId,
+																				entityGuid:
+																					derivedState.currentMethodLevelTelemetry
+																						.newRelicEntityGuid,
+																			},
 																		})
 																	);
 																} catch (ex) {

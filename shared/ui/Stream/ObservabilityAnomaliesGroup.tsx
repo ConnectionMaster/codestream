@@ -2,16 +2,13 @@ import React, { useMemo, useState } from "react";
 import { shallowEqual } from "react-redux";
 import { useAppDispatch, useAppSelector } from "@codestream/webview/utilities/hooks";
 import { CodeStreamState } from "../store";
-import { ErrorRow } from "./Observability";
+import { ErrorRow } from "./ErrorRow";
 import { Row } from "./CrossPostIssueControls/IssuesPane";
 import { HostApi } from "@codestream/webview/webview-api";
-import { EditorRevealSymbolRequestType } from "@codestream/protocols/webview";
-import { WebviewPanels } from "@codestream/protocols/api";
-import {
-	closeAllPanels,
-	openPanel,
-	setCurrentObservabilityAnomaly,
-} from "@codestream/webview/store/context/actions";
+import { IdeNames, OpenEditorViewNotificationType } from "@codestream/protocols/webview";
+import { CLMSettings } from "@codestream/protocols/api";
+import { setCurrentObservabilityAnomaly } from "@codestream/webview/store/context/actions";
+import { closeAllPanels } from "@codestream/webview/store/context/thunks";
 import Tooltip from "./Tooltip";
 import {
 	DetectionMethod,
@@ -22,6 +19,7 @@ import {
 import Icon from "./Icon";
 import styled from "styled-components";
 import { isEmpty as _isEmpty } from "lodash-es";
+import { getNrAiUserId } from "@codestream/webview/store/users/reducer";
 
 interface Props {
 	accountId: number;
@@ -58,57 +56,66 @@ const FilePathMiddleSection = styled.span`
 
 export const ObservabilityAnomaliesGroup = React.memo((props: Props) => {
 	const dispatch = useAppDispatch();
+
 	const derivedState = useAppSelector((state: CodeStreamState) => {
 		const clmSettings = state.preferences.clmSettings || {};
 		return {
+			ideName: encodeURIComponent(state.ide.name || ""),
+			nrAiUserId: getNrAiUserId(state),
+			userId: state.session.userId,
+			demoMode: state.codeErrors.demoMode,
 			clmSettings,
+			isProductionCloud: state.configs.isProductionCloud,
+			sessionStart: state.context.sessionStart,
 		};
 	}, shallowEqual);
 	const [numToShow, setNumToShow] = useState(5);
 	const [hoveredRowIndex, setHoveredRowIndex] = useState<string | undefined>(undefined);
 	const hasMoreAnomaliesToShow = props.observabilityAnomalies.length > numToShow;
 
-	const handleClickTelemetry = () => {
+	const handleClickTelemetry = (anomaly: ObservabilityAnomaly) => {
 		const event: TelemetryData = {
 			entity_guid: props.entityGuid,
 			account_id: props.accountId,
-			meta_data: `anomaly_category: ${
-				props.observabilityAnomalies[0].scope ? "metric" : "transaction"
-			}`,
+			meta_data: `anomaly_category: ${anomaly.scope ? "metric" : "transaction"}`,
 			meta_data_2: `anomaly_type: ${
-				props.observabilityAnomalies[0].type === "duration"
+				anomaly.type === "duration"
 					? "avg_duration"
-					: props.observabilityAnomalies[0].type === "errorRate"
+					: anomaly.type === "errorRate"
 					? "error_rate"
 					: ""
 			}`,
-			meta_data_4: `detection_method: ${
-				props.detectionMethod === "Release Based"
-					? "release_based"
-					: props.detectionMethod === "Time Based"
-					? "time_based"
-					: "<unknown>"
-			}`,
 			meta_data_3: `language: ${props.observabilityAnomalies[0]?.language ?? "<unknown>"}`,
+			meta_data_5: `anomaly_prefix: ${anomaly.name.split("/")[0]}`,
 			event_type: "click",
 		};
 
 		console.debug("CLM Anomaly Clicked", event);
 
-		HostApi.instance.track("codestream/anomaly clicked", event);
+		HostApi.instance.track("codestream/anomaly_link clicked", event);
 	};
 
 	const handleClick = (anomaly: ObservabilityAnomaly) => {
-		handleClickTelemetry();
-		HostApi.instance.send(EditorRevealSymbolRequestType, {
-			codeFilepath: anomaly.codeAttrs?.codeFilepath,
-			codeNamespace: anomaly.codeAttrs?.codeNamespace,
-			codeFunction: anomaly.codeAttrs?.codeFunction,
-			language: anomaly.language,
-		});
+		handleClickTelemetry(anomaly);
 		dispatch(closeAllPanels());
 		dispatch(setCurrentObservabilityAnomaly(anomaly, props.entityGuid!, props.entityName));
-		dispatch(openPanel(WebviewPanels.ObservabilityAnomaly));
+
+		HostApi.instance.notify(OpenEditorViewNotificationType, {
+			panel: "anomaly",
+			title: "Anomaly",
+			entryPoint: "tree_view",
+			entityGuid: props.entityGuid,
+			entityName: props.entityName,
+			anomaly: anomaly,
+			clmSettings: derivedState.clmSettings as CLMSettings,
+			isProductionCloud: derivedState.isProductionCloud,
+			nrAiUserId: derivedState.nrAiUserId,
+			userId: derivedState.userId,
+			demoMode: derivedState.demoMode.enabled,
+			ide: {
+				name: derivedState.ideName as IdeNames,
+			},
+		});
 	};
 
 	const formatFilePath = (filepath: String) => {
@@ -193,7 +200,12 @@ export const ObservabilityAnomaliesGroup = React.memo((props: Props) => {
 											}}
 										>
 											<TransactionIconSpan>
-												<Icon style={{ paddingTop: "2px" }} className="subtle" name="anomaly" />
+												<Icon
+													style={{ paddingTop: "2px", paddingLeft: "0px" }}
+													className="subtle"
+													name="anomaly"
+													data-testid={`anomaly-index-${index}`}
+												/>
 											</TransactionIconSpan>
 											<Tooltip title={tooltipContent(anomaly)} placement="topRight" delay={1}>
 												{formatFilePath(anomaly.text)}
@@ -212,7 +224,7 @@ export const ObservabilityAnomaliesGroup = React.memo((props: Props) => {
 													return (
 														<Row
 															style={{
-																padding: "0 10px 0 48px",
+																padding: "0 10px 0 54px",
 															}}
 															className={"pr-row"}
 															onClick={e => {
@@ -227,7 +239,7 @@ export const ObservabilityAnomaliesGroup = React.memo((props: Props) => {
 														>
 															<TransactionIconSpan>
 																<Icon
-																	style={{ paddingTop: "2px" }}
+																	style={{ paddingTop: "2px", paddingLeft: "0px" }}
 																	className="subtle"
 																	name="anomaly"
 																/>

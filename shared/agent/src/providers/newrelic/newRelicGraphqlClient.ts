@@ -2,12 +2,12 @@ import { GraphQLClient } from "graphql-request";
 import { ResponseError } from "vscode-jsonrpc/lib/messages";
 import {
 	ERROR_LOGGED_OUT,
+	ERROR_NRQL_INVALID_INPUT,
 	ERROR_NR_CONNECTION_INVALID_API_KEY,
 	ERROR_NR_CONNECTION_MISSING_API_KEY,
 	ERROR_NR_CONNECTION_MISSING_URL,
 	ERROR_NR_INSUFFICIENT_API_KEY,
 } from "@codestream/protocols/agent";
-import { customFetch, isSuppressedException } from "../../system/fetchCore";
 import { CSNewRelicProviderInfo } from "@codestream/protocols/api";
 import { VersionInfo } from "../../types";
 import { CodeStreamSession } from "../../session";
@@ -26,9 +26,10 @@ import {
 import * as Dom from "graphql-request/dist/types.dom";
 import { ContextLogger } from "../contextLogger";
 import { Disposable } from "../../system/disposable";
-
-const PRODUCTION_US_GRAPHQL_URL = "https://api.newrelic.com/graphql";
-const PRODUCTION_EU_GRAPHQL_URL = "https://api-eu.newrelic.com/graphql";
+import { NrApiConfig, PRODUCTION_EU_GRAPHQL_URL, PRODUCTION_US_GRAPHQL_URL } from "./nrApiConfig";
+import { FetchCore } from "../../system/fetchCore";
+import { isSuppressedException } from "../../system/suppressedNetworkExceptions";
+import { tokenHolder } from "./TokenHolder";
 
 const ignoredErrors = [GraphqlNrqlTimeoutError];
 
@@ -39,12 +40,35 @@ export interface HttpErrorResponse {
 	response: {
 		status: number;
 		error: string;
+		errors?: [
+			{
+				extensions?: {
+					errorClass?: string;
+				};
+				message?: string;
+			},
+		];
 		headers: Dom.Headers;
 	};
 	request: {
 		query: string;
 		variables: object;
 	};
+}
+
+interface Timeseries {
+	contents?: { function: string; simple: boolean }[];
+	messages?: {}[];
+}
+
+export interface ResponseMetadata {
+	facet?: string;
+	eventType: string;
+	rawSince: string;
+	contents: {
+		timeSeries: Timeseries;
+	};
+	timeSeries?: Timeseries;
 }
 
 function isHttpErrorResponse(ex: unknown): ex is HttpErrorResponse {
@@ -54,6 +78,14 @@ function isHttpErrorResponse(ex: unknown): ex is HttpErrorResponse {
 		httpErrorResponse?.response?.status !== undefined &&
 		httpErrorResponse?.response?.headers !== undefined &&
 		httpErrorResponse?.request?.query !== undefined
+	);
+}
+
+export function isInvalidInputErrorResponse(ex: unknown): ex is HttpErrorResponse {
+	const httpErrorResponse = ex as HttpErrorResponse;
+	const errors = httpErrorResponse?.response?.errors;
+	return (
+		Array.isArray(errors) && errors.length && errors[0]?.extensions?.errorClass === "INVALID_INPUT"
 	);
 }
 
@@ -67,35 +99,23 @@ export class NewRelicGraphqlClient implements Disposable {
 	private _newRelicUserId: number | undefined = undefined;
 	private _accountIds: number[] | undefined = undefined;
 	private _onGraphqlClientConnected = new Array<OnGraphqlClientConnected>();
+	private _additionalHeaders: { [key: string]: string } = {};
 
 	constructor(
+		private nrApiConfig: NrApiConfig,
 		private session: CodeStreamSession,
 		private providerInfo: CSNewRelicProviderInfo | undefined,
 		private versionInfo: VersionInfo,
-		private isProductionCloud: boolean
+		private isProductionCloud: boolean,
+		private fetchClient: FetchCore
 	) {}
 
+	get graphqlUrl() {
+		return this.nrApiConfig.graphqlUrl;
+	}
+
 	get apiUrl() {
-		return this.session.newRelicApiUrl ?? "https://api.newrelic.com";
-	}
-	get baseUrl() {
-		return this.apiUrl;
-	}
-
-	get coreUrl() {
-		return this.apiUrl.replace("api.", "one.");
-	}
-
-	get accessToken() {
-		return this.providerInfo?.accessToken;
-	}
-
-	get graphQlBaseUrl() {
-		if (this.providerInfo?.bearerToken) {
-			return `${this.coreUrl}/graphql`;
-		} else {
-			return `${this.baseUrl}/graphql`;
-		}
+		return this.nrApiConfig.apiUrl;
 	}
 
 	addOnGraphqlClientConnected(onGraphqlClientConnected: OnGraphqlClientConnected) {
@@ -103,65 +123,65 @@ export class NewRelicGraphqlClient implements Disposable {
 	}
 
 	get headers() {
-		const headers: { [key: string]: string } = {
-			"Content-Type": "application/json",
-			"newrelic-requesting-services": "CodeStream",
-		};
+		const headers: { [key: string]: string } = this.nrApiConfig.baseHeaders;
 
-		const token = this.providerInfo?.accessToken;
+		const token = tokenHolder.accessToken;
 		if (token) {
-			if (this.providerInfo?.bearerToken) {
-				if (this.providerInfo?.tokenType === "access") {
-					headers["x-access-token"] = token;
-				} else {
-					headers["x-id-token"] = token;
-				}
-				//headers["Authorization"] = `Bearer ${token}`;
+			if (tokenHolder.tokenType === "access") {
+				headers["x-access-token"] = token;
 			} else {
-				headers["Api-Key"] = token;
+				headers["x-id-token"] = token;
 			}
 		}
+
+		Object.keys(this._additionalHeaders).map(ah => {
+			headers[ah] = this._additionalHeaders[ah];
+		});
+
 		return headers;
+	}
+
+	addHeader(key: string, value: string): void {
+		this._additionalHeaders[key] = value;
 	}
 
 	protected async client(useOtherRegion?: boolean): Promise<GraphQLClient> {
 		let client: GraphQLClient;
-		if (!this.accessToken) {
+		const accessToken = tokenHolder.accessToken;
+		if (!accessToken) {
 			throw new ResponseError(ERROR_LOGGED_OUT, "User is not logged in");
 		}
-		// if (useOtherRegion && this.session.isProductionCloud) {
+
 		if (useOtherRegion) {
-			const newGraphQlBaseUrl = this.graphQlBaseUrl;
+			const newGraphQlBaseUrl = this.graphqlUrl;
 			if (newGraphQlBaseUrl === PRODUCTION_US_GRAPHQL_URL) {
 				client = this._client = await this.createClientAndValidateKey(
 					PRODUCTION_EU_GRAPHQL_URL,
-					this.accessToken
+					accessToken
 				);
 			} else if (newGraphQlBaseUrl === PRODUCTION_EU_GRAPHQL_URL) {
 				client = this._client = await this.createClientAndValidateKey(
 					PRODUCTION_US_GRAPHQL_URL,
-					this.accessToken
+					accessToken
 				);
 			} else {
 				client =
-					this._client ??
-					(await this.createClientAndValidateKey(this.graphQlBaseUrl, this.accessToken));
+					this._client ?? (await this.createClientAndValidateKey(this.graphqlUrl, accessToken));
 			}
 			this._clientUrlNeedsUpdate = true;
 		} else {
 			if (this._clientUrlNeedsUpdate) {
-				client = await this.createClientAndValidateKey(this.graphQlBaseUrl, this.accessToken);
+				client = await this.createClientAndValidateKey(this.graphqlUrl, accessToken);
 				this._clientUrlNeedsUpdate = false;
 			} else {
 				client =
-					this._client ??
-					(await this.createClientAndValidateKey(this.graphQlBaseUrl, this.accessToken));
+					this._client ?? (await this.createClientAndValidateKey(this.graphqlUrl, accessToken));
 			}
 		}
 
 		client.setHeaders(this.headers);
 		ContextLogger.setData({
-			nrUrl: this.graphQlBaseUrl,
+			nrUrl: this.graphqlUrl,
 			versionInfo: {
 				version: this.versionInfo?.extension?.version,
 				build: this.versionInfo?.extension?.build,
@@ -183,8 +203,7 @@ export class NewRelicGraphqlClient implements Disposable {
 			);
 		}
 		const options = {
-			agent: this.session.proxyAgent ?? undefined,
-			fetch: customFetch,
+			fetch: this.fetchClient.customFetch.bind(this.fetchClient),
 		};
 		const client = new GraphQLClient(graphQlBaseUrl, options);
 		client.setHeaders(this.headers);
@@ -263,49 +282,17 @@ export class NewRelicGraphqlClient implements Disposable {
 		variables: Record<string, string>,
 		useOtherRegion?: boolean
 	) {
-		let resp;
 		const client = await this.client(useOtherRegion);
-		let triedRefresh = false;
-		while (!resp) {
-			try {
-				resp = await client.request<T>(query, variables);
-				// fetchCore will have retried 3 times by now
-			} catch (ex) {
-				if (
-					this.session.api.usingServiceGatewayAuth &&
-					!triedRefresh &&
-					this.providerInfo &&
-					this.providerInfo.refreshToken !== undefined
-				) {
-					Logger.log("NerdGraph call failed, attempting to refresh NR access token...");
-					let tokenInfo;
-					try {
-						tokenInfo = await this.session.api.refreshNewRelicToken(
-							this.providerInfo.refreshToken!
-						);
-						Logger.log("NR access token successfully refreshed, trying request again...");
-						this.providerInfo.accessToken = tokenInfo.accessToken;
-						this.providerInfo.refreshToken = tokenInfo.refreshToken;
-						this.providerInfo.tokenType = tokenInfo.tokenType;
-						if (tokenInfo.tokenType === "access") {
-							client.setHeader("x-access-token", tokenInfo.accessToken);
-						} else {
-							client.setHeader("x-id-token", tokenInfo.accessToken);
-						}
-						triedRefresh = true;
-						resp = undefined;
-					} catch (refreshEx) {
-						Logger.warn("Exception thrown refreshing New Relic access token", refreshEx);
-						// We tried refresh but didn't work, throw the original exception
-						throw ex;
-					}
-				} else {
-					// We tried refresh once or we're not usingServiceGatewayAuth
-					throw ex;
-				}
+		try {
+			//throw new Error("oops"); // uncomment to test roadblock
+			return await client.request<T>(query, variables);
+			// fetchCore will have retried 3 times by now
+		} catch (ex) {
+			if (isInvalidInputErrorResponse(ex)) {
+				throw ex;
 			}
+			throw ex;
 		}
-		return resp;
 	}
 
 	private getAccessTokenError(ex: any): { message: string } | undefined {
@@ -376,7 +363,6 @@ export class NewRelicGraphqlClient implements Disposable {
 	async query<T = any>(
 		query: string,
 		variables: any = undefined,
-		tryCount = 3,
 		isMultiRegion = false
 	): Promise<T> {
 		if (this.providerInfo && this.providerInfo.tokenError) {
@@ -387,65 +373,68 @@ export class NewRelicGraphqlClient implements Disposable {
 		let response: any;
 		let responseOther: any;
 		let ex: Error | undefined;
-		const fn = async () => {
-			try {
-				let potentialResponse, potentialOtherResponse;
-				if (isMultiRegion) {
-					const currentRegionPromise = await this.clientRequestWrap<T>(query, variables, false);
-					const otherRegionPromise = await this.clientRequestWrap<T>(query, variables, true);
-					[potentialResponse, potentialOtherResponse] = await Promise.all([
-						currentRegionPromise,
-						otherRegionPromise,
-					]);
-				} else {
-					potentialResponse = await this.clientRequestWrap<T>(query, variables, false);
-				}
-				// GraphQL returns happy HTTP 200 response for api level errors
-				if (potentialOtherResponse) {
-					this.checkGraphqlErrors(potentialResponse);
-					this.checkGraphqlErrors(potentialOtherResponse);
-					response = potentialResponse;
-					responseOther = potentialOtherResponse;
-				} else {
-					this.checkGraphqlErrors(potentialResponse);
-					response = potentialResponse;
-				}
-				return true;
-			} catch (potentialEx) {
-				if (isHttpErrorResponse(potentialEx)) {
-					const contentType = potentialEx.response.headers.get("content-type");
-					const niceText = contentType?.toLocaleLowerCase()?.includes("text/html")
-						? makeHtmlLoggable(potentialEx.response.error)
-						: potentialEx.response.error;
-					const loggableError = `Error HTTP ${contentType} ${potentialEx.response.status}: ${niceText}`;
-					ex = new Error(
-						`Error HTTP ${contentType} ${potentialEx.response.status}: Internal Error`
-					);
-					Logger.warn(loggableError);
-					return false;
-				}
-				Logger.warn(potentialEx.message);
-				ex = potentialEx;
-				return false;
+		try {
+			let potentialResponse, potentialOtherResponse;
+			if (isMultiRegion) {
+				const currentRegionPromise = await this.clientRequestWrap<T>(query, variables, false);
+				const otherRegionPromise = await this.clientRequestWrap<T>(query, variables, true);
+				[potentialResponse, potentialOtherResponse] = await Promise.all([
+					currentRegionPromise,
+					otherRegionPromise,
+				]);
+			} else {
+				potentialResponse = await this.clientRequestWrap<T>(query, variables, false);
 			}
-		};
-		await Functions.withExponentialRetryBackoff(fn, tryCount, 1000);
+			// GraphQL returns happy HTTP 200 response for api level errors
+			if (potentialOtherResponse) {
+				this.checkGraphqlErrors(potentialResponse);
+				this.checkGraphqlErrors(potentialOtherResponse);
+				response = potentialResponse;
+				responseOther = potentialOtherResponse;
+			} else {
+				this.checkGraphqlErrors(potentialResponse);
+				response = potentialResponse;
+			}
+		} catch (potentialEx) {
+			if (isInvalidInputErrorResponse(potentialEx)) {
+				const message = potentialEx.response.errors![0].message || "NRQL Syntax Error";
+				Logger.warn(message);
+				ex = new ResponseError(ERROR_NRQL_INVALID_INPUT, message);
+				response = undefined;
+			}
+
+			if (isHttpErrorResponse(potentialEx)) {
+				const contentType = potentialEx.response.headers.get("content-type");
+				const niceText = contentType?.toLocaleLowerCase()?.includes("text/html")
+					? makeHtmlLoggable(potentialEx.response.error)
+					: potentialEx.response.error;
+				const loggableError = `Error HTTP ${contentType} ${potentialEx.response.status}: ${niceText}`;
+				ex = new Error(`Error HTTP ${contentType} ${potentialEx.response.status}: Internal Error`);
+				Logger.warn(loggableError);
+			}
+			Logger.warn(potentialEx.message);
+			if (!ex) {
+				ex = potentialEx;
+			}
+		}
 
 		// If multiRegion, and we are doing an entitySearch query, add region values
 		if (responseOther) {
 			let responseRegion, responseRegionOther;
-			if (this.graphQlBaseUrl === PRODUCTION_US_GRAPHQL_URL) {
+			if (this.graphqlUrl === PRODUCTION_US_GRAPHQL_URL) {
 				responseRegion = "US";
 				responseRegionOther = "EU";
 			} else {
 				responseRegion = "EU";
 				responseRegionOther = "US";
 			}
-			for (let i = 0; i < response.actor.entitySearch.results.entities.length; i++) {
-				response.actor.entitySearch.results.entities[i].region = responseRegion;
-			}
-			for (let i = 0; i < responseOther.actor.entitySearch.results.entities.length; i++) {
-				responseOther.actor.entitySearch.results.entities[i].region = responseRegionOther;
+			if (response && response.actor) {
+				for (let i = 0; i < response.actor.entitySearch.results.entities.length; i++) {
+					response.actor.entitySearch.results.entities[i].region = responseRegion;
+				}
+				for (let i = 0; i < responseOther.actor.entitySearch.results.entities.length; i++) {
+					responseOther.actor.entitySearch.results.entities[i].region = responseRegionOther;
+				}
 			}
 
 			const combinedArray = [
@@ -474,6 +463,7 @@ export class NewRelicGraphqlClient implements Disposable {
 				}
 				const insufficientApiKeyError = this.getInsufficientApiKeyError(ex);
 				if (insufficientApiKeyError) {
+					Logger.error(ex, "Root cause error for ERROR_NR_INSUFFICIENT_API_KEY");
 					throw new ResponseError(ERROR_NR_INSUFFICIENT_API_KEY, "Insufficient New Relic API key");
 				}
 
@@ -486,9 +476,6 @@ export class NewRelicGraphqlClient implements Disposable {
 	}
 
 	async mutate<T>(query: string, variables: any = undefined) {
-		// TODO re-implement
-		// await this.ensureConnected();
-
 		return this.clientRequestWrap<T>(query, variables); //(await this.client()).request<T>(query, variables);
 	}
 
@@ -574,10 +561,7 @@ export class NewRelicGraphqlClient implements Disposable {
 	): Promise<{
 		results: T[];
 		rawResponse: {
-			metadata: {
-				eventType: string;
-				rawSince: string;
-			};
+			metadata: ResponseMetadata;
 		};
 	}> {
 		const query = `query Nrql($accountId:Int!) {
@@ -596,10 +580,7 @@ export class NewRelicGraphqlClient implements Disposable {
 					nrql: {
 						results: T[];
 						rawResponse: {
-							metadata: {
-								eventType: string;
-								rawSince: string;
-							};
+							metadata: ResponseMetadata;
 						};
 					};
 				};
@@ -607,6 +588,7 @@ export class NewRelicGraphqlClient implements Disposable {
 		}>(query, { accountId });
 		return results.actor.account.nrql;
 	}
+
 	async runNrql<T>(accountId: number, nrql: string, timeout: number = 60): Promise<T[]> {
 		const query = `query Nrql($accountId:Int!) {
 			actor {
@@ -627,6 +609,81 @@ export class NewRelicGraphqlClient implements Disposable {
 			};
 		}>(query, { accountId });
 		return results.actor.account.nrql.results;
+	}
+
+	async runAsyncNrql<T>(accountId: number, nrql: string): Promise<T[]> {
+		const query = `query Nrql($accountId:Int!, $nrql:Nrql!) {
+			actor {
+				account(id: $accountId) {
+					nrql(query: $nrql, timeout: 1, async: true) {
+						results
+						queryProgress {
+							completed
+							queryId
+						}
+					}
+				}
+			}
+		}`;
+
+		const queryResults = await this.query<{
+			actor: {
+				account: {
+					nrql: {
+						results: T[];
+						queryProgress: {
+							completed: boolean;
+							queryId: string;
+						};
+					};
+				};
+			};
+		}>(query, { accountId, nrql });
+
+		//bail out early if, for some reason, we got something back that quickly
+		if (queryResults.actor.account.nrql.queryProgress.completed) {
+			return queryResults.actor.account.nrql.results;
+		}
+
+		const queryId = queryResults.actor.account.nrql.queryProgress.queryId;
+
+		const queryProgress = `query Nrql($accountId:Int!, $queryId:Id!) {
+			actor {
+			  account(id: $accountId) {
+				nrqlQueryProgress( queryId: $queryId) {
+				  results
+				  queryProgress {
+					completed
+				  }
+				}
+			  }
+			}
+		  }`;
+
+		let completed = false;
+		let results: T[] = [];
+
+		while (!completed) {
+			const queryProgressResults = await this.query<{
+				actor: {
+					account: {
+						nrqlQueryProgress: {
+							results: T[];
+							queryProgress: {
+								completed: boolean;
+							};
+						};
+					};
+				};
+			}>(queryProgress, { accountId, queryId });
+
+			completed = queryProgressResults.actor.account.nrqlQueryProgress.queryProgress.completed;
+			results = queryProgressResults.actor.account.nrqlQueryProgress.results;
+
+			await Functions.wait(5000);
+		}
+
+		return results;
 	}
 
 	errorLogIfNotIgnored(ex: Error, message: string, ...params: any[]): void {

@@ -79,6 +79,11 @@ import {
 	VersionCompatibility,
 	DidRefreshAccessTokenNotificationType,
 	ThirdPartyProviders,
+	WhatsNewNotificationType,
+	SessionTokenStatus,
+	DidChangeSessionTokenStatusNotificationType,
+	DidDetectObservabilityAnomaliesNotificationType,
+	EntityObservabilityAnomalies,
 } from "@codestream/protocols/agent";
 import {
 	CSAccessTokenType,
@@ -128,7 +133,11 @@ import {
 	Strings,
 } from "./system";
 import { testGroups } from "./testGroups";
-import { ProxyAgent, setGlobalDispatcher } from "undici";
+import { ProxyAgent, setGlobalDispatcher, Agent as UndiciAgent } from "undici";
+import * as fs from "fs";
+import { FetchCore } from "./system/fetchCore";
+import { tokenHolder } from "./providers/newrelic/TokenHolder";
+import { newRelicResponseInterceptor } from "./system/newRelicResponseInterceptor";
 
 // https://regex101.com/r/Yn5uqi/1
 const envRegex = /https?:\/\/(?:codestream)?-?([a-zA-Z]+)?(?:[0-9])?(?:\.)((\w+)-?(?:\w+)?)?/i;
@@ -199,6 +208,8 @@ export interface VersionInfo {
 }
 
 export class CodeStreamSession {
+	sessionStartTime: number | undefined = undefined;
+
 	private _onDidChangeCodemarks = new Emitter<CSCodemark[]>();
 	get onDidChangeCodemarks(): Event<CSCodemark[]> {
 		return this._onDidChangeCodemarks.event;
@@ -271,6 +282,7 @@ export class CodeStreamSession {
 	private _broadcasterRecoveryTimer: NodeJS.Timeout | undefined;
 	private _echoTimer: NodeJS.Timeout | undefined;
 	private _echoDidTimeout: boolean = false;
+	private _cachedAnomalyData: { [entityGuid: string]: EntityObservabilityAnomalies } = {};
 
 	constructor(
 		public readonly agent: CodeStreamAgent,
@@ -298,11 +310,15 @@ export class CodeStreamSession {
 				Logger.log(
 					`Proxy support is in override with url=${redactedUrl}, strictSSL=${_options.proxy.strictSSL}`
 				);
+				// proxy for PubNub
 				this._httpsAgent = new HttpsProxyAgent(_options.proxy.url, {
-					rejectUnauthorized: _options.proxy.strictSSL,
+					rejectUnauthorized: this.rejectUnauthorized,
 				});
 				// Set proxy for fetchCore (undici and future native fetch)
-				const dispatcher = new ProxyAgent({ uri: new URL(_options.proxy.url).toString() });
+				const dispatcher = new ProxyAgent({
+					uri: new URL(_options.proxy.url).toString(),
+					connect: { rejectUnauthorized: this.rejectUnauthorized },
+				});
 				setGlobalDispatcher(dispatcher);
 			} else {
 				Logger.log("Proxy support is in override, but no proxy settings were provided");
@@ -320,7 +336,17 @@ export class CodeStreamSession {
 				} catch {}
 
 				if (proxyUri) {
-					this._httpsAgent = new HttpsProxyAgent(proxyUrl, { rejectUnauthorized: strictSSL });
+					// proxy for PubNub
+					this._httpsAgent = new HttpsProxyAgent(proxyUrl, {
+						rejectUnauthorized: this.rejectUnauthorized,
+					});
+					// Set proxy for fetchCore (undici and future native fetch)
+					setGlobalDispatcher(
+						new ProxyAgent({
+							uri: proxyUrl,
+							connect: { rejectUnauthorized: this.rejectUnauthorized },
+						})
+					);
 				}
 			} else {
 				Logger.log("Proxy support is on, but no proxy url was found");
@@ -330,9 +356,18 @@ export class CodeStreamSession {
 		}
 
 		if (!this._httpsAgent) {
+			// agent for PubNub
 			this._httpsAgent = new HttpsAgent({
 				rejectUnauthorized: this.rejectUnauthorized,
 			});
+			// Set agent for fetchCore (undici and future native fetch)
+			setGlobalDispatcher(
+				new UndiciAgent({
+					connect: {
+						rejectUnauthorized: this.rejectUnauthorized,
+					},
+				})
+			);
 		}
 
 		// if our api server is http (on-prem installation), create a separate http agent
@@ -343,11 +378,14 @@ export class CodeStreamSession {
 
 		Logger.log(`API Server URL: >${_options.serverUrl}<`);
 		Logger.log(`Reject unauthorized: ${this.rejectUnauthorized}`);
+		// Todo add refresh token handling
+		this._nrFetchClient = new FetchCore(newRelicResponseInterceptor);
 		this._api = new CodeStreamApiProvider(
 			_options.serverUrl?.trim(),
 			this.versionInfo,
-			this._httpAgent || this._httpsAgent,
-			this.rejectUnauthorized
+			this._httpAgent ?? this._httpsAgent,
+			this.rejectUnauthorized,
+			this._nrFetchClient
 		);
 
 		this._api.useMiddleware({
@@ -356,10 +394,7 @@ export class CodeStreamSession {
 			},
 
 			onResponse: async (context: Readonly<CodeStreamApiMiddlewareContext>, _) => {
-				if (
-					context.response?.headers.get("X-CS-API-Maintenance-Mode") &&
-					this._codestreamAccessToken
-				) {
+				if (context.response?.headers.get("X-CS-API-Maintenance-Mode") && tokenHolder.accessToken) {
 					this._didEncounterMaintenanceMode();
 				}
 
@@ -416,7 +451,7 @@ export class CodeStreamSession {
 
 		this.agent.registerHandler(VerifyConnectivityRequestType, () => this.verifyConnectivity());
 		this.agent.registerHandler(GetAccessTokenRequestType, e => {
-			return { accessToken: this._codestreamAccessToken! };
+			return { accessToken: tokenHolder.accessToken! };
 		});
 		this.agent.registerHandler(PasswordLoginRequestType, e => this.passwordLogin(e));
 		this.agent.registerHandler(TokenLoginRequestType, e => this.tokenLogin(e));
@@ -441,17 +476,13 @@ export class CodeStreamSession {
 		this.agent.registerHandler(
 			BootstrapRequestType,
 			async (e, cancellationToken: CancellationToken) => {
-				const { companies, repos, streams, teams, users, codeErrors } = SessionContainer.instance();
-
-				// needed to ensure we subscribe to object streams for all code errors we have access to
-				await codeErrors.ensureCached();
+				const { companies, repos, streams, teams, users } = SessionContainer.instance();
 
 				const promise = Promise.all([
 					companies.get(),
 					repos.get(),
 					streams.get(),
 					teams.get(),
-					users.getUnreads({}),
 					users.get(),
 					users.getPreferences(),
 				]);
@@ -461,7 +492,6 @@ export class CodeStreamSession {
 					reposResponse,
 					streamsResponse,
 					teamsResponse,
-					unreadsResponse,
 					usersResponse,
 					preferencesResponse,
 				] = await promise;
@@ -472,7 +502,6 @@ export class CodeStreamSession {
 					repos: reposResponse.repos,
 					streams: streamsResponse.streams,
 					teams: teamsResponse.teams,
-					unreads: unreadsResponse.unreads,
 					users: usersResponse.users,
 					providers: this.providers,
 					apiCapabilities: this.apiCapabilities,
@@ -511,7 +540,7 @@ export class CodeStreamSession {
 
 	onAccessTokenChanged(token: string, refreshToken?: string, tokenType?: CSAccessTokenType) {
 		Logger.log("Session access token was changed, notifying extension...");
-		this._codestreamAccessToken = token;
+		// this._codestreamAccessToken = token;
 		this.agent.sendNotification(DidRefreshAccessTokenNotificationType, {
 			url: this._options.serverUrl,
 			email: this._email!,
@@ -522,6 +551,15 @@ export class CodeStreamSession {
 		});
 	}
 
+	onSessionTokenStatusChanged = Functions.debounceMemoized(
+		(status: SessionTokenStatus) => {
+			Logger.log(`Session token status changed: ${status}`);
+			this.agent.sendNotification(DidChangeSessionTokenStatusNotificationType, { status });
+		},
+		5000,
+		{ leading: true }
+	);
+
 	private _didEncounterMaintenanceMode() {
 		this.agent.sendNotification(DidEncounterMaintenanceModeNotificationType, {
 			teamId: this._teamId,
@@ -529,7 +567,7 @@ export class CodeStreamSession {
 				email: this._email!,
 				url: this._options.serverUrl,
 				teamId: this._teamId!,
-				value: this._codestreamAccessToken!,
+				value: tokenHolder.accessToken!,
 			},
 		});
 	}
@@ -563,14 +601,6 @@ export class CodeStreamSession {
 		}
 
 		switch (e.type) {
-			case MessageType.Codemarks:
-				const codemarks = await SessionContainer.instance().codemarks.enrichCodemarks(e.data);
-				this._onDidChangeCodemarks.fire(codemarks);
-				this.agent.sendNotification(DidChangeDataNotificationType, {
-					type: ChangeDataType.Codemarks,
-					data: codemarks,
-				});
-				break;
 			case MessageType.Companies:
 				this.agent.sendNotification(DidChangeDataNotificationType, {
 					type: ChangeDataType.Companies,
@@ -588,20 +618,6 @@ export class CodeStreamSession {
 				}
 				this.agent.sendNotification(DidChangeConnectionStatusNotificationType, data);
 				break;
-			case MessageType.MarkerLocations:
-				this._onDidChangeMarkerLocations.fire(e.data);
-				this.agent.sendNotification(DidChangeDataNotificationType, {
-					type: ChangeDataType.MarkerLocations,
-					data: e.data,
-				});
-				break;
-			case MessageType.Markers:
-				this._onDidChangeMarkers.fire(e.data);
-				this.agent.sendNotification(DidChangeDataNotificationType, {
-					type: ChangeDataType.Markers,
-					data: e.data,
-				});
-				break;
 			case MessageType.Posts:
 				const posts = await SessionContainer.instance().posts.enrichPosts(e.data);
 				this._onDidChangePosts.fire(posts);
@@ -617,34 +633,9 @@ export class CodeStreamSession {
 					data: e.data,
 				});
 				break;
-			case MessageType.Repositories:
-				this._onDidChangeRepositories.fire(e.data);
-				this.agent.sendNotification(DidChangeDataNotificationType, {
-					type: ChangeDataType.Repositories,
-					data: e.data,
-				});
-				break;
-			case MessageType.Reviews:
-				this.agent.sendNotification(DidChangeDataNotificationType, {
-					type: ChangeDataType.Reviews,
-					data: e.data,
-				});
-				break;
 			case MessageType.CodeErrors:
 				this.agent.sendNotification(DidChangeDataNotificationType, {
 					type: ChangeDataType.CodeErrors,
-					data: e.data,
-				});
-				break;
-			case MessageType.AsyncError:
-				this.agent.sendNotification(DidChangeDataNotificationType, {
-					type: ChangeDataType.AsyncError,
-					data: e.data,
-				});
-				break;
-			case MessageType.GrokStream:
-				this.agent.sendNotification(DidChangeDataNotificationType, {
-					type: ChangeDataType.GrokStream,
 					data: e.data,
 				});
 				break;
@@ -659,12 +650,6 @@ export class CodeStreamSession {
 				this._onDidChangeTeams.fire(e.data);
 				this.agent.sendNotification(DidChangeDataNotificationType, {
 					type: ChangeDataType.Teams,
-					data: e.data,
-				});
-				break;
-			case MessageType.Unreads:
-				this.agent.sendNotification(DidChangeDataNotificationType, {
-					type: ChangeDataType.Unreads,
 					data: e.data,
 				});
 				break;
@@ -686,6 +671,23 @@ export class CodeStreamSession {
 			case MessageType.Echo:
 				this.echoReceived();
 				break;
+			case MessageType.AnomalyData:
+				if (!(e.data instanceof Array)) return;
+				for (let datum of e.data) {
+					if (typeof datum === "object") {
+						for (let entityGuid in datum) {
+							this._cachedAnomalyData[entityGuid] = datum[
+								entityGuid
+							] as EntityObservabilityAnomalies;
+							this.agent.sendNotification(DidDetectObservabilityAnomaliesNotificationType, {
+								entityGuid,
+								duration: datum[entityGuid].durationAnomalies,
+								errorRate: datum[entityGuid].errorRateAnomalies,
+							});
+						}
+					}
+				}
+				break;
 		}
 	}
 
@@ -703,6 +705,49 @@ export class CodeStreamSession {
 			data,
 		});
 		return data[0];
+	}
+
+	@log()
+	async whatsNewNotification() {
+		try {
+			const currentVersion = this.versionInfo.extension.version;
+			const me = await SessionContainer.instance().users.getMe();
+			const preferences = me.preferences;
+
+			const hasBeenNotified = preferences?.whatsNewNotificationsSent?.find(wnns => {
+				return currentVersion.startsWith(wnns);
+			});
+
+			// already tracked for this version; bail out
+			if (hasBeenNotified) {
+				return;
+			}
+
+			const whatsNewBuffer = fs.readFileSync(path.join(__dirname, "WhatsNew.json"), {
+				encoding: "utf-8",
+			});
+			const whatsNew: { version: string; title: string }[] = JSON.parse(whatsNewBuffer);
+
+			const isFlagged = whatsNew.find(wn => {
+				return currentVersion.startsWith(wn.version);
+			});
+
+			if (isFlagged) {
+				this.agent.sendNotification(WhatsNewNotificationType, {
+					title: isFlagged.title,
+				});
+				const newPreference = {
+					whatsNewNotificationsSent: [
+						...(preferences?.whatsNewNotificationsSent ?? []),
+						isFlagged.version,
+					],
+				};
+				this._api?.updatePreferences({ preferences: newPreference });
+			}
+		} catch (err) {
+			//log it, but bail silently. don't want this interrupting users
+			Logger.error(err, `whatsNewNotification`);
+		}
 	}
 
 	@log()
@@ -739,6 +784,11 @@ export class CodeStreamSession {
 		}
 	}
 
+	private _nrFetchClient: FetchCore;
+	get nrFetchClient() {
+		return this._nrFetchClient;
+	}
+
 	private _api: ApiProvider | undefined;
 	get api() {
 		return this._api!;
@@ -757,11 +807,6 @@ export class CodeStreamSession {
 	private _email: string | undefined;
 	get email() {
 		return this._email!;
-	}
-
-	private _codestreamAccessToken: string | undefined;
-	get codestreamAccessToken() {
-		return this._codestreamAccessToken;
 	}
 
 	private _environmentInfo: CodeStreamEnvironmentInfo = {
@@ -820,6 +865,14 @@ export class CodeStreamSession {
 		return this.environmentInfo.newRelicSecApiUrl;
 	}
 
+	get newRelicTaxonomyEnforcerUrl() {
+		return this.environmentInfo.telemetryEndpoint;
+	}
+
+	get o11yServerUrl() {
+		return this.environmentInfo.o11yServerUrl;
+	}
+
 	get disableStrictSSL(): boolean {
 		return this._options.disableStrictSSL != null ? this._options.disableStrictSSL : false;
 	}
@@ -872,6 +925,10 @@ export class CodeStreamSession {
 	private _providers: ThirdPartyProviders = {};
 	get providers() {
 		return this._providers!;
+	}
+
+	public getCachedAnomalyData(entityGuid: string): EntityObservabilityAnomalies | undefined {
+		return this._cachedAnomalyData[entityGuid];
 	}
 
 	@memoize
@@ -956,6 +1013,8 @@ export class CodeStreamSession {
 			newRelicLandingServiceUrl: response.newRelicLandingServiceUrl,
 			newRelicApiUrl: response.newRelicApiUrl,
 			newRelicSecApiUrl: response.newRelicSecApiUrl,
+			o11yServerUrl: response.o11yServerUrl,
+			telemetryEndpoint: response.telemetryEndpoint,
 			environmentHosts: response.environmentHosts,
 		};
 		Logger.log("Got environment from connectivity response:", this._environmentInfo);
@@ -1145,10 +1204,13 @@ export class CodeStreamSession {
 					let error = loginApiErrorMappings[ex.info.code] || LoginResult.Unknown;
 					if (error === LoginResult.ProviderConnectFailed) {
 						Container.instance().telemetry.track({
-							eventName: "codestream/user login_failed",
+							eventName: "codestream/user/login failed",
 							properties: {
 								meta_data: `error: ${ex.info && ex.info.error}`,
 								event_type: "response",
+								platform: "codestream",
+								path: "N/A (codestream)",
+								section: "N/A (codestream)",
 							},
 						});
 						// map the reason for provider auth failure
@@ -1187,8 +1249,8 @@ export class CodeStreamSession {
 		if (response.accessTokenInfo?.tokenType) {
 			token.tokenType = response.accessTokenInfo.tokenType;
 		}
-		this._codestreamAccessToken = token.value;
-		this.api.setAccessToken(token.value, response.accessTokenInfo);
+		//  probably don't need as this.api.login() sets it
+		// tokenHolder.setAccessToken("session login", token.value, response.accessTokenInfo);
 		this._teamId = (this._options as any).teamId = token.teamId;
 		this._codestreamUserId = response.user.id;
 		this._nrUserId = response.user.nrUserId;
@@ -1264,8 +1326,6 @@ export class CodeStreamSession {
 			});
 		});
 
-		SessionContainer.instance().reviews.initializeCurrentBranches();
-
 		// this needs to happen before initializing telemetry, because super-properties are dependent
 		if (this.apiCapabilities.testGroups) {
 			const company = await this.setCompanyTestGroups();
@@ -1301,6 +1361,8 @@ export class CodeStreamSession {
 
 		setImmediate(() => {
 			this.agent.sendNotification(DidLoginNotificationType, { data: loginResponse });
+			this.whatsNewNotification();
+			this.sessionStartTime = Date.now();
 		});
 
 		if (!response.user.timeZone) {
@@ -1596,7 +1658,7 @@ export class CodeStreamSession {
 		}
 
 		const props: { [key: string]: any } = {
-			user_id: user.nrUserId,
+			//user_id: user.nrUserId,
 			platform: "codestream",
 			path: "N/A (codestream)",
 			section: "N/A (codestream)",

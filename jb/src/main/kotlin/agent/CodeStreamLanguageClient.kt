@@ -66,7 +66,6 @@ class CodeStreamLanguageClient(private val project: Project) : LanguageClient {
 
     @JsonNotification("codestream/didChangePullRequestComments")
     fun didChangePullRequestComments(notification: DidChangePullRequestCommentsNotification) {
-        project.editorService?.updatePullRequestDiffMarkers()
         project.webViewService?.postNotification("codestream/didChangePullRequestComments", notification)
     }
 
@@ -86,6 +85,11 @@ class CodeStreamLanguageClient(private val project: Project) : LanguageClient {
             }
             "pullRequests" -> session.didChangePullRequests(gson.fromJson(notification.data))
         }
+    }
+
+    @JsonNotification("codestream/didChangeSessionTokenStatus")
+    fun didChangeSessionTokenStatus(json: JsonElement) {
+        project.webViewService?.postNotification("codestream/didChangeSessionTokenStatus", json)
     }
 
     @JsonNotification("codestream/didChangeConnectionStatus")
@@ -136,13 +140,6 @@ class CodeStreamLanguageClient(private val project: Project) : LanguageClient {
     @JsonNotification("codestream/didFailLogin")
     fun didFailLogin(json: JsonElement?) {}
 
-    @JsonNotification("codestream/didEncounterInvalidRefreshToken")
-    fun didEncounterInvalidRefreshToken(json: JsonElement?) {
-        appDispatcher.launch {
-            project.authenticationService?.onDidEncounterInvalidRefreshToken();
-        }
-    }
-
     @JsonNotification("codestream/didLogin")
     fun didLogin(json: JsonElement) {
         val notification = gson.fromJson<DidLoginNotification>(json)
@@ -168,8 +165,9 @@ class CodeStreamLanguageClient(private val project: Project) : LanguageClient {
     }
 
     @JsonNotification("codestream/didDetectObservabilityAnomalies")
-    fun didDetectObservabilityAnomalies(notification: DidDetectObservabilityAnomaliesNotification) {
-        project.notificationComponent?.didDetectObservabilityAnomalies(notification.entityGuid, notification.duration, notification.errorRate)
+    fun didDetectObservabilityAnomalies(json: JsonElement) {
+        project.webViewService?.postNotification("codestream/didDetectObservabilityAnomalies", json, true)
+//        project.notificationComponent?.didDetectObservabilityAnomalies(notification.entityGuid, notification.duration, notification.errorRate)
     }
 
     @JsonNotification("codestream/didChangeBranch")
@@ -263,6 +261,11 @@ class CodeStreamLanguageClient(private val project: Project) : LanguageClient {
     @JsonNotification("codestream/didChangeCodelenses")
     fun didChangeCodelenses(json: JsonElement?) {
         project.sessionService?.didChangeCodelenses()
+    }
+
+    @JsonNotification("codestream/whatsNew")
+    fun whatsNew(notification: WhatsNewNotification){
+        project.notificationComponent?.whatsNew(notification.title)
     }
 
     override fun workspaceFolders(): CompletableFuture<MutableList<WorkspaceFolder>> {
@@ -388,6 +391,8 @@ class FilterNamespacesResponse(val filteredNamespaces: List<String>)
 class ResolveStackTracePathsRequest(val paths: List<String?>?, val language: String?)
 
 class ResolveStackTracePathsResponse(val resolvedPaths: List<String?>)
+
+class WhatsNewNotification(val title: String)
 
 enum class ApiVersionCompatibility {
     @SerializedName("apiCompatible")

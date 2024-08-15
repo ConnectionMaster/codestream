@@ -2,7 +2,6 @@ import {
 	EntityAccount,
 	ObservabilityAnomaly,
 	RegisterUserRequest,
-	RepoProjectType,
 } from "@codestream/protocols/agent";
 import { CodemarkType, WebviewPanels } from "@codestream/protocols/api";
 
@@ -55,36 +54,21 @@ export const closePrDetailModal =
 		dispatch(openPanel(WebviewPanels.Sidebar));
 		dispatch(setCurrentCodemark());
 		dispatch(setCurrentReview());
-		dispatch(setCurrentCodeError());
+		dispatch(setCurrentCodeErrorData());
 		dispatch(setCurrentPullRequest(providerId, id, "", "", "sidebar-diffs", groupIndex));
 		dispatch(clearCurrentErrorsInboxOptions());
 		dispatch(clearCurrentInstrumentationOptions());
-		dispatch(clearWantNewRelicOptions());
 		dispatch(setCurrentMethodLevelTelemetry(undefined));
 	};
-
-export const closeAllPanels = () => dispatch => {
-	dispatch(closeModal());
-	dispatch(openPanel(WebviewPanels.Sidebar));
-	dispatch(setCurrentCodemark());
-	dispatch(setCurrentReview());
-	dispatch(setCurrentCodeError());
-	dispatch(clearCurrentPullRequest());
-	dispatch(clearCurrentErrorsInboxOptions());
-	dispatch(clearCurrentInstrumentationOptions());
-	dispatch(clearWantNewRelicOptions());
-	dispatch(setCurrentMethodLevelTelemetry(undefined));
-};
 
 export const closeAllModals = () => dispatch => {
 	dispatch(closeModal());
 	dispatch(setCurrentCodemark());
 	dispatch(setCurrentReview());
-	dispatch(setCurrentCodeError());
+	dispatch(setCurrentCodeErrorData());
 	dispatch(clearCurrentPullRequest());
 	dispatch(clearCurrentErrorsInboxOptions());
 	dispatch(clearCurrentInstrumentationOptions());
-	dispatch(clearWantNewRelicOptions());
 	dispatch(setCurrentMethodLevelTelemetry(undefined));
 };
 
@@ -146,6 +130,9 @@ export const setCurrentMethodLevelTelemetry = (data: any) =>
 export const setEntityAccounts = (entityAccounts: EntityAccount[]) =>
 	action(ContextActionsType.SetEntityAccounts, { entityAccounts });
 
+export const setCurrentEntityGuid = (entityGuid: string) =>
+	action(ContextActionsType.SetCurrentEntityGuid, { entityGuid });
+
 export const setCurrentObservabilityAnomaly = (
 	anomaly?: ObservabilityAnomaly,
 	entityGuid?: string,
@@ -196,13 +183,8 @@ export const setCurrentReview =
 export const setCurrentReviewOptions = (options: any) =>
 	action(ContextActionsType.SetCurrentReviewOptions, { options });
 
-export const _setCurrentCodeError = (codeErrorId?: string, data?: any) =>
-	action(ContextActionsType.SetCurrentCodeError, { codeErrorId, data });
-
-export const setCurrentCodeError =
-	(codeErrorId?: string, data?: CodeErrorData) => (dispatch, getState) => {
-		return dispatch(_setCurrentCodeError(codeErrorId, data));
-	};
+export const setCurrentCodeErrorData = (errorGuid?: string, data?: CodeErrorData) =>
+	action(ContextActionsType.SetCurrentCodeErrorData, { errorGuid, data });
 
 export const setCurrentRepo = (id?: string, path?: string) =>
 	action(ContextActionsType.SetCurrentRepo, { id, path });
@@ -259,18 +241,14 @@ export const setCurrentPullRequestNeedsRefresh = (
 		pullRequestId,
 	});
 
+export const setCurrentServiceSearchEntity = (entityGuid?: string) =>
+	action(ContextActionsType.SetCurrentServiceSearchEntity, { entityGuid });
+
 export const setCurrentInstrumentationOptions = (options?: any) =>
 	action(ContextActionsType.SetCurrentInstrumentationOptions, { options });
 
 export const setCurrentPixieDynamicLoggingOptions = (options?: any) =>
 	action(ContextActionsType.SetCurrentPixieDynamicLoggingOptions, { options });
-
-export const setWantNewRelicOptions = (
-	projectType: RepoProjectType,
-	repoId?: string,
-	path?: string,
-	projects?: { path: string; name?: string; version?: string }[]
-) => action(ContextActionsType.SetWantNewRelicOptions, { projectType, repoId, path, projects });
 
 export const setNewPullRequestOptions = (options?: { branch: NewPullRequestBranch }) =>
 	action(ContextActionsType.SetNewPullRequestOptions, { options });
@@ -284,9 +262,6 @@ export const clearCurrentInstrumentationOptions = () =>
 export const clearCurrentPixieDynamicLoggingOptions = () =>
 	action(ContextActionsType.SetCurrentPixieDynamicLoggingOptions, { options: {} });
 
-export const clearWantNewRelicOptions = () =>
-	action(ContextActionsType.SetClearNewRelicOptions, {});
-
 export const clearCurrentPullRequest = () =>
 	action(ContextActionsType.SetCurrentPullRequest, {
 		providerId: "",
@@ -295,8 +270,6 @@ export const clearCurrentPullRequest = () =>
 		source: "",
 		view: undefined,
 	});
-
-export const setOnboardStep = (step: number) => action(ContextActionsType.SetOnboardStep, { step });
 
 export const setStartWorkCard = (card: any) =>
 	action(ContextActionsType.SetStartWorkCard, { card });

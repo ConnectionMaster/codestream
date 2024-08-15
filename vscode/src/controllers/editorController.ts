@@ -14,6 +14,7 @@ import { CodeStreamSession } from "../api/session";
 
 import {
 	IpcRoutes,
+	OpenErrorGroupRequestType,
 	OpenInBufferRequestType,
 	SaveFileRequestType,
 	ShellPromptFolderRequestType,
@@ -22,11 +23,13 @@ import {
 	WebviewIpcNotificationMessage,
 	WebviewIpcRequestMessage,
 	isIpcRequestMessage,
-	isIpcResponseMessage
+	isIpcResponseMessage,
+	OpenUrlRequestType
 } from "@codestream/protocols/webview";
 import { WebviewLike } from "webviews/webviewLike";
 import { NotificationType, RequestType } from "vscode-languageclient";
 import { Container } from "../container";
+import { openUrl } from "../urlHandler";
 
 export class EditorController implements Disposable {
 	private _disposable: Disposable | undefined;
@@ -37,7 +40,7 @@ export class EditorController implements Disposable {
 	) {
 		this._disposable = Disposable.from(
 			this._editor!.onDidMessageReceive(
-				(args: any) => this.onWebviewMessageReceived(_editor, args),
+				(args: WebviewIpcMessage) => this.onWebviewMessageReceived(_editor, args),
 				this
 			)
 		);
@@ -153,23 +156,49 @@ export class EditorController implements Disposable {
 			}
 			case OpenInBufferRequestType.method: {
 				webview.onIpcRequest(OpenInBufferRequestType, e, async (_type, _params) => {
-					const document = await workspace.openTextDocument();
-					const editor = await window.showTextDocument(document);
+					try {
+						const document = await workspace.openTextDocument();
+						const editor = await window.showTextDocument(document);
 
-					if (_params.data) {
+						if (!_params.data || !_params.contentType) {
+							return {
+								success: true
+							};
+						}
+
 						const edit = new WorkspaceEdit();
-						const newText =
-							_params.contentType === "json" ? JSON.stringify(_params.data, null, 4) : _params.data;
-						edit.insert(document.uri, new Position(0, 0), newText);
-						await workspace.applyEdit(edit);
-					}
 
-					if (_params.contentType) {
-						languages.setTextDocumentLanguage(editor.document, _params.contentType);
+						edit.insert(document.uri, new Position(0, 0), _params.data);
+						await workspace.applyEdit(edit);
+
+						languages.setTextDocumentLanguage(
+							editor.document,
+							_params.contentType === "json" ? "json" : "plaintext"
+						);
+
+						return {
+							success: true
+						};
+					} catch (ex) {
+						return {
+							success: false
+						};
 					}
+				});
+				break;
+			}
+			case OpenErrorGroupRequestType.method: {
+				webview.onIpcRequest(OpenErrorGroupRequestType, e, async (_type, _params) => {
+					await Container.sidebar.openErrorGroup(_params);
 					return {
 						success: true
 					};
+				});
+				break;
+			}
+			case OpenUrlRequestType.method: {
+				webview.onIpcRequest(OpenUrlRequestType, e, async (_type, _params) => {
+					await openUrl(_params.url);
 				});
 				break;
 			}

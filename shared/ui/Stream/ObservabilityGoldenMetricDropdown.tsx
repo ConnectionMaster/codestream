@@ -1,117 +1,74 @@
-import { EntityGoldenMetrics, GetIssuesResponse } from "@codestream/protocols/agent";
+import { EntityGoldenMetrics } from "@codestream/protocols/agent";
 import { isEmpty as _isEmpty } from "lodash-es";
-import React from "react";
+import React, { useState } from "react";
 import { Row } from "./CrossPostIssueControls/IssuesPane";
 import Icon from "./Icon";
 import Tooltip from "./Tooltip";
 import { ObservabilityLoadingGoldenMetrics } from "@codestream/webview/Stream/ObservabilityLoading";
-import { useAppSelector, useAppDispatch } from "../utilities/hooks";
+import { useAppSelector } from "../utilities/hooks";
 import { CodeStreamState } from "@codestream/webview/store";
-import { setUserPreference } from "./actions";
 import { HostApi } from "../webview-api";
-import { OpenUrlRequestType } from "../ipc/host.protocol";
+import { OpenEditorViewNotificationType, OpenUrlRequestType } from "../ipc/host.protocol";
+import { parseId } from "../utilities/newRelic";
 
 interface Props {
 	entityGoldenMetrics: EntityGoldenMetrics | undefined;
 	errors: string[];
 	loadingGoldenMetrics: boolean;
 	noDropdown?: boolean;
-	recentIssues?: GetIssuesResponse;
 	entityGuid: string;
+	accountId?: number;
+	isServiceSearch?: boolean;
 }
 
 export const ObservabilityGoldenMetricDropdown = React.memo((props: Props) => {
-	const dispatch = useAppDispatch();
-
+	const [isExpanded, setIsExpanded] = useState<boolean>(props.isServiceSearch ? false : true);
 	const derivedState = useAppSelector((state: CodeStreamState) => {
-		const { preferences } = state;
-
-		const goldenMetricsDropdownIsExpanded = preferences?.goldenMetricsDropdownIsExpanded ?? true;
+		const { preferences, context, ide } = state;
 
 		return {
-			goldenMetricsDropdownIsExpanded,
+			currentEntityGuid: context.currentEntityGuid,
+			ideName: ide?.name,
+			supportsExploreYourData: ide?.name === "VSC" || ide?.name === "JETBRAINS",
 		};
 	});
 
-	const { errors, entityGuid, entityGoldenMetrics, loadingGoldenMetrics, noDropdown } = props;
+	const { errors, entityGuid, accountId, entityGoldenMetrics, loadingGoldenMetrics, noDropdown } =
+		props;
 
 	const pillsData = entityGoldenMetrics?.pillsData;
 
-	function getErrorPillsJSX(displayValue, displayUnits) {
+	const getTerminalIcon = (query: string) => {
+		if (!query) return null;
+
 		return (
-			<>
-				<span className={"status"} style={{ opacity: 1, color: "var(--text-color)" }}>
-					<>
-						{displayValue}
-						{displayUnits && <>{displayUnits} </>}
-					</>
+			<Icon
+				name="terminal"
+				className="clickable"
+				title="Explore this data"
+				placement="bottomLeft"
+				delay={1}
+				onClick={e => {
+					e.preventDefault();
+					e.stopPropagation();
 
-					{Number(pillsData?.errorRateData?.percentChange) >= 0 ? (
-						<span
-							style={
-								Number(pillsData?.errorRateData?.percentChange) >= 0 &&
-								Number(pillsData?.errorRateData?.percentChange) <= 5
-									? { color: "#FFD23D" }
-									: Number(pillsData?.errorRateData?.percentChange) > 5
-									? { color: "#DF2D24" }
-									: {}
-							}
-						>
-							<>
-								{Number(pillsData?.errorRateData?.percentChange) === 0 ? (
-									<>(+{"<"}1%)</>
-								) : (
-									<>(+{pillsData?.errorRateData?.percentChange}%)</>
-								)}
-							</>
-						</span>
-					) : (
-						<></>
-					)}
-				</span>
-				<span>{getGlobeIcon()}</span>
-			</>
+					HostApi.instance.notify(OpenEditorViewNotificationType, {
+						panel: "nrql",
+						title: "NRQL",
+						entryPoint: "golden_metrics",
+						query: query,
+						accountId: parseId(derivedState.currentEntityGuid || "")?.accountId,
+						entityGuid: derivedState.currentEntityGuid!,
+						ide: {
+							name: derivedState.ideName,
+						},
+					});
+				}}
+			/>
 		);
-	}
+	};
 
-	function getResponseTimePillsJSX(displayValue, displayUnits) {
-		return (
-			<>
-				<span className={"status"} style={{ opacity: 1, color: "var(--text-color)" }}>
-					<>
-						{displayValue}
-						{displayUnits && <>{displayUnits} </>}
-					</>
-
-					{Number(pillsData?.responseTimeData?.percentChange) >= 0 ? (
-						<span
-							style={
-								Number(pillsData?.responseTimeData?.percentChange) >= 0 &&
-								Number(pillsData?.responseTimeData?.percentChange) <= 5
-									? { color: "#FFD23D" }
-									: Number(pillsData?.responseTimeData?.percentChange) > 5
-									? { color: "#DF2D24" }
-									: {}
-							}
-						>
-							<>
-								{Number(pillsData?.responseTimeData?.percentChange) === 0 ? (
-									<>(+{"<"}1%)</>
-								) : (
-									<>(+{pillsData?.responseTimeData?.percentChange}%)</>
-								)}
-							</>
-						</span>
-					) : (
-						<></>
-					)}
-				</span>
-				<span>{getGlobeIcon()}</span>
-			</>
-		);
-	}
-
-	function getGlobeIcon() {
+	const getGlobeIcon = () => {
 		return (
 			<Icon
 				name="globe"
@@ -122,6 +79,13 @@ export const ObservabilityGoldenMetricDropdown = React.memo((props: Props) => {
 				onClick={e => {
 					e.preventDefault();
 					e.stopPropagation();
+					HostApi.instance.track("codestream/newrelic_link clicked", {
+						entity_guid: entityGuid,
+						account_id: accountId,
+						meta_data: "destination: change_tracking",
+						meta_data_2: `codestream_section: golden_metrics`,
+						event_type: "click",
+					});
 					HostApi.instance.send(OpenUrlRequestType, {
 						url:
 							pillsData?.responseTimeData?.permalinkUrl ||
@@ -131,7 +95,7 @@ export const ObservabilityGoldenMetricDropdown = React.memo((props: Props) => {
 				}}
 			/>
 		);
-	}
+	};
 
 	const errorTitle: string | undefined =
 		errors.length === 0 ? undefined : `Last request failed:\n${errors.join("\n")}`;
@@ -140,11 +104,17 @@ export const ObservabilityGoldenMetricDropdown = React.memo((props: Props) => {
 		return (
 			<>
 				{entityGoldenMetrics?.metrics.map(gm => {
+					const percentChange =
+						gm.name === "errorRate"
+							? pillsData?.errorRateData?.percentChange
+							: gm.name === "responseTimeMs"
+							? pillsData?.responseTimeData?.percentChange
+							: undefined;
 					return (
 						<Row
 							className={"pr-row no-shrink"}
 							style={{
-								padding: noDropdown ? "0 10px 0 60px" : "0 10px 0 42px",
+								padding: noDropdown ? "0 10px 0 60px" : "0 10px 0 50px",
 							}}
 						>
 							<div data-testid={`${gm.name}-${entityGuid}`}>
@@ -153,18 +123,36 @@ export const ObservabilityGoldenMetricDropdown = React.memo((props: Props) => {
 								</Tooltip>
 							</div>
 
-							<span className={"icons"}>
+							<span className={"icons"} style={{ display: "flex", alignItems: "center" }}>
 								{gm.value || gm.value === 0 ? (
 									<>
-										{gm.name === "errorRate" ? (
-											<> {getErrorPillsJSX(gm.displayValue, gm.displayUnit)}</>
-										) : gm.name === "responseTimeMs" ? (
-											<> {getResponseTimePillsJSX(gm.displayValue, gm.displayUnit)}</>
-										) : (
-											<span>
-												{gm.displayValue} {gm.displayUnit && <>{gm.displayUnit}</>}
-											</span>
-										)}
+										<span style={{ opacity: 1, color: "var(--text-color)" }}>
+											<>
+												{gm.displayValue}
+												{gm.displayUnit && <>{gm.displayUnit} </>}
+											</>
+
+											{percentChange && percentChange >= 0 ? (
+												<span
+													style={
+														percentChange >= 0 && percentChange <= 5
+															? { color: "#FFD23D" }
+															: percentChange > 5
+															? { color: "#DF2D24" }
+															: {}
+													}
+												>
+													<>{percentChange === 0 ? <>(+{"<"}1%)</> : <>(+{percentChange}%)</>}</>
+												</span>
+											) : (
+												<></>
+											)}
+										</span>
+										{derivedState.supportsExploreYourData
+											? getTerminalIcon(gm.queries?.timeseries || "")
+											: null}
+										{/* only show the globe on hover if percent change is there*/}
+										{percentChange ? <>{getGlobeIcon()}</> : <></>}
 									</>
 								) : (
 									<>No Data</>
@@ -178,14 +166,7 @@ export const ObservabilityGoldenMetricDropdown = React.memo((props: Props) => {
 	};
 
 	const handleRowOnClick = () => {
-		const { goldenMetricsDropdownIsExpanded } = derivedState;
-
-		dispatch(
-			setUserPreference({
-				prefPath: ["goldenMetricsDropdownIsExpanded"],
-				value: !goldenMetricsDropdownIsExpanded,
-			})
-		);
+		setIsExpanded(!isExpanded);
 	};
 
 	return (
@@ -194,14 +175,14 @@ export const ObservabilityGoldenMetricDropdown = React.memo((props: Props) => {
 				<>
 					<Row
 						style={{
-							padding: "2px 10px 2px 30px",
+							padding: "2px 10px 2px 40px",
 						}}
 						className={"pr-row"}
 						onClick={() => handleRowOnClick()}
 						data-testid={`golden-metrics-dropdown`}
 					>
-						{derivedState.goldenMetricsDropdownIsExpanded && <Icon name="chevron-down-thin" />}
-						{!derivedState.goldenMetricsDropdownIsExpanded && <Icon name="chevron-right-thin" />}
+						{isExpanded && <Icon name="chevron-down-thin" />}
+						{!isExpanded && <Icon name="chevron-right-thin" />}
 						<span data-testid={`golden-metrics-${entityGuid}`} style={{ margin: "0 5px 0 2px" }}>
 							Golden Metrics
 						</span>
@@ -232,10 +213,8 @@ export const ObservabilityGoldenMetricDropdown = React.memo((props: Props) => {
 				</>
 			)}
 
-			{derivedState.goldenMetricsDropdownIsExpanded && loadingGoldenMetrics && (
-				<ObservabilityLoadingGoldenMetrics />
-			)}
-			{(noDropdown || derivedState.goldenMetricsDropdownIsExpanded) &&
+			{isExpanded && loadingGoldenMetrics && <ObservabilityLoadingGoldenMetrics />}
+			{(noDropdown || isExpanded) &&
 				!loadingGoldenMetrics &&
 				!_isEmpty(entityGoldenMetrics?.metrics) && <>{goldenMetricOutput()}</>}
 		</>

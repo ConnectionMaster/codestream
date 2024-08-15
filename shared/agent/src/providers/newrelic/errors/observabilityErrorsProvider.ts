@@ -19,6 +19,9 @@ import {
 	GetObservabilityErrorsRequest,
 	GetObservabilityErrorsRequestType,
 	GetObservabilityErrorsResponse,
+	GetObservabilityErrorsWithoutReposRequestType,
+	GetObservabilityErrorsWithoutReposRequest,
+	GetObservabilityErrorsWithoutReposResponse,
 	isNRErrorResponse,
 	NewRelicErrorGroup,
 	ObservabilityError,
@@ -38,20 +41,35 @@ import { NrApiConfig } from "../nrApiConfig";
 import { isEmpty as _isEmpty } from "lodash";
 import { mapNRErrorResponse, parseId } from "../utils";
 import { ContextLogger } from "../../contextLogger";
-import { CSNewRelicProviderInfo } from "@codestream/protocols/api";
-import { customFetch } from "../../../system/fetchCore";
 
 const ALLOWED_ENTITY_ACCOUNT_DOMAINS_FOR_ERRORS = ["APM", "BROWSER", "EXT", "INFRA"];
-import { NraiProvider } from "../nrai/nraiProvider";
+import { SourceMapProvider } from "./sourceMapProvider";
+import { getRepoName } from "@codestream/utils/system/string";
+import {
+	BaseError,
+	errorQueryResultToCommonError,
+	ErrorResultWrapper,
+	getFingerprintedErrorTraceQueries,
+} from "./errorQueries";
+
+export type ErrorEventApiResponse<T> = {
+	actor: {
+		account: {
+			nrql: {
+				nrql: string;
+				results: T[];
+			};
+		};
+	};
+};
 
 @lsp
 export class ObservabilityErrorsProvider {
 	constructor(
 		private reposProvider: ReposProvider,
-		private nraiProvider: NraiProvider,
 		private graphqlClient: NewRelicGraphqlClient,
 		private nrApiConfig: NrApiConfig,
-		private providerInfo: CSNewRelicProviderInfo | undefined
+		private sourceMapProvider: SourceMapProvider
 	) {}
 
 	/**
@@ -61,12 +79,10 @@ export class ObservabilityErrorsProvider {
 	 *
 	 * @param {GetObservabilityErrorsRequest} request
 	 * @return {Promise<GetObservabilityErrorsResponse>}
-	 * @memberof NewRelicProvider
+	 * @memberof ObservabilityErrorsProvider
 	 */
 	@lspHandler(GetObservabilityErrorsRequestType)
-	@log({
-		timed: true,
-	})
+	@log()
 	async getObservabilityErrors(
 		request: GetObservabilityErrorsRequest
 	): Promise<GetObservabilityErrorsResponse> {
@@ -86,8 +102,6 @@ export class ObservabilityErrorsProvider {
 			filteredRepos = filteredRepos?.filter(_ => _.id);
 
 			if (!filteredRepos || !filteredRepos.length) return response;
-
-			const showAI = await this.nraiProvider.getAIEligibility();
 
 			for (const repo of filteredRepos) {
 				if (!repo.remotes || !repo.id) continue;
@@ -149,43 +163,52 @@ export class ObservabilityErrorsProvider {
 								continue;
 							}
 
-							const errorTraces = await this.findFingerprintedErrorTraces(
+							const entityType: EntityType =
+								application.source.entity.entityType ?? "APM_APPLICATION_ENTITY";
+							const timeWindow = request.timeWindow ?? "3 days";
+							const errorTraceWrappers = await this.findFingerprintedErrorTraces(
 								application.source.entity.account.id,
 								application.source.entity.guid,
-								application.source.entity.entityType,
-								request.timeWindow
+								entityType,
+								timeWindow
 							);
-							for (const errorTrace of errorTraces) {
-								try {
-									const response = await this.getErrorGroupFromNameMessageEntity(
-										errorTrace.errorClass,
-										errorTrace.message,
-										errorTrace.entityGuid
-									);
+							for (const errorTraceWrapper of errorTraceWrappers) {
+								for (const errorTrace of errorTraceWrapper.response) {
+									try {
+										const response = await this.getErrorGroupDetails(
+											errorTrace,
+											errorTraceWrapper.errorQuery.entityType
+										);
 
-									if (response && response.actor.errorsInbox.errorGroup) {
-										observabilityErrors.push({
-											entityId: errorTrace.entityGuid,
-											appName: errorTrace.appName,
-											errorClass: errorTrace.errorClass,
-											message: errorTrace.message,
-											remote: application.urlValue!,
-											errorGroupGuid: response.actor.errorsInbox.errorGroup.id,
-											occurrenceId: errorTrace.occurrenceId,
-											count: errorTrace.count,
-											lastOccurrence: errorTrace.lastOccurrence,
-											errorGroupUrl: response.actor.errorsInbox.errorGroup.url,
-											showAI,
-										});
-										if (observabilityErrors.length > 4) {
-											gotoEnd = true;
-											break;
+										const commonErrorTrace = errorQueryResultToCommonError(
+											errorTraceWrapper.errorQuery,
+											errorTrace
+										);
+
+										if (response && response.actor.errorsInbox.errorGroup) {
+											observabilityErrors.push({
+												entityId: commonErrorTrace.entityGuid,
+												appName: commonErrorTrace.appName,
+												errorClass: commonErrorTrace.errorClass,
+												message: commonErrorTrace.message,
+												remote: application.urlValue!,
+												errorGroupGuid: response.actor.errorsInbox.errorGroup.id,
+												occurrenceId: commonErrorTrace.occurrenceId,
+												traceId: commonErrorTrace.traceId,
+												count: commonErrorTrace.count,
+												lastOccurrence: commonErrorTrace.lastOccurrence,
+												errorGroupUrl: response.actor.errorsInbox.errorGroup.url,
+											});
+											if (observabilityErrors.length > 4) {
+												gotoEnd = true;
+												break;
+											}
 										}
+									} catch (ex) {
+										ContextLogger.warn("internal error getErrorGroupGuid", {
+											ex: ex,
+										});
 									}
-								} catch (ex) {
-									ContextLogger.warn("internal error getErrorGroupGuid", {
-										ex: ex,
-									});
 								}
 							}
 
@@ -197,7 +220,7 @@ export class ObservabilityErrorsProvider {
 				}
 				response.repos?.push({
 					repoId: repo.id!,
-					repoName: this.reposProvider.getRepoName(repo),
+					repoName: getRepoName(repo),
 					errors: observabilityErrors!,
 				});
 			}
@@ -212,30 +235,111 @@ export class ObservabilityErrorsProvider {
 	}
 
 	/**
+	 * Returns a list of errors for a given entity without a repo required
+	 *
+	 * Can throw errors
+	 *
+	 * @param {GetObservabilityErrorsWithoutReposRequest} request
+	 * @return {Promise<GetObservabilityErrorsWithoutReposResponse>}
+	 * @memberof ObservabilityErrorsProvider
+	 */
+	@lspHandler(GetObservabilityErrorsWithoutReposRequestType)
+	@log()
+	async getObservabilityErrorsWithoutRepos(
+		request: GetObservabilityErrorsWithoutReposRequest
+	): Promise<GetObservabilityErrorsWithoutReposResponse> {
+		const response: GetObservabilityErrorsWithoutReposResponse = { repos: [] };
+		const observabilityErrors: ObservabilityError[] = [];
+		let gotoEnd = false;
+
+		try {
+			const errorTraceWrappers = await this.findFingerprintedErrorTraces(
+				request.accountId,
+				request.entityGuid,
+				request.entityType,
+				request.timeWindow
+			);
+			for (const errorTraceWrapper of errorTraceWrappers) {
+				for (const errorTrace of errorTraceWrapper.response) {
+					try {
+						const response = await this.getErrorGroupDetails(
+							errorTrace,
+							errorTraceWrapper.errorQuery.entityType
+						);
+
+						const commonErrorTrace = errorQueryResultToCommonError(
+							errorTraceWrapper.errorQuery,
+							errorTrace
+						);
+
+						if (response && response.actor.errorsInbox.errorGroup) {
+							observabilityErrors.push({
+								entityId: commonErrorTrace.entityGuid,
+								appName: commonErrorTrace.appName,
+								errorClass: commonErrorTrace.errorClass,
+								message: commonErrorTrace.message,
+								remote: "",
+								errorGroupGuid: response.actor.errorsInbox.errorGroup.id,
+								occurrenceId: commonErrorTrace.occurrenceId,
+								traceId: commonErrorTrace.traceId,
+								count: commonErrorTrace.count,
+								lastOccurrence: commonErrorTrace.lastOccurrence,
+								errorGroupUrl: response.actor.errorsInbox.errorGroup.url,
+							});
+							if (observabilityErrors.length > 4) {
+								gotoEnd = true;
+								break;
+							}
+						}
+					} catch (ex) {
+						ContextLogger.warn("internal error getErrorGroupGuid", {
+							ex: ex,
+						});
+					}
+				}
+			}
+		} catch (ex) {
+			ContextLogger.error(ex, "getObservabilityErrors");
+			if (ex instanceof ResponseError) {
+				throw ex;
+			}
+			return { error: mapNRErrorResponse(ex) };
+		}
+		response.repos?.push({
+			repoId: "serviceSearch",
+			repoName: "serviceSearch",
+			errors: observabilityErrors!,
+		});
+		return response;
+	}
+
+	/**
 	 * Find a list of error traces grouped by fingerprint
 	 *
 	 * @param accountId the NR1 account id to query against
 	 * @param applicationGuid the entityGuid for the application to query for
+	 * @param entityType apm app / browser app / mobile app
+	 * @param timeWindow nrql since string of the format "x days ago"
 	 * @returns list of most recent error traces for each unique fingerprint
 	 */
-	@log({ timed: true })
+	@log()
 	private async findFingerprintedErrorTraces(
 		accountId: number,
 		applicationGuid: string,
-		entityType?: EntityType,
-		timeWindow?: string
-	) {
-		const queries = this.getFingerprintedErrorTraceQueries(applicationGuid, entityType, timeWindow);
+		entityType: EntityType | string,
+		timeWindow: string
+	): Promise<ErrorResultWrapper[]> {
+		const queries = getFingerprintedErrorTraceQueries(applicationGuid, entityType, timeWindow);
 
-		const results = [];
+		const results: ErrorResultWrapper[] = [];
 		for (const query of queries) {
-			const response = await this.graphqlClient.query(
+			const response: ErrorEventApiResponse<BaseError> = await this.graphqlClient.query(
 				`query fetchErrorsInboxFacetedData($accountId:Int!) {
-						actor {
-						  account(id: $accountId) {
-							nrql(query: "${query}", timeout: 60) { nrql results }
-						  }
-						}
+							actor {
+								account(id: $accountId) {
+								nrql(query: "${query.query}", timeout: 60) { nrql results }
+								}
+							}
 					  }
 					  `,
 				{
@@ -243,44 +347,68 @@ export class ObservabilityErrorsProvider {
 				}
 			);
 			if (response.actor.account.nrql.results?.length) {
-				results.push(...response.actor.account.nrql.results);
+				results.push({ errorQuery: query, response: response.actor.account.nrql.results });
 			}
 		}
 		return results;
 	}
 
-	@log({ timed: true })
-	async getErrorGroupFromNameMessageEntity(name: string, message: string, entityGuid: string) {
+	private getSourceType(entityType?: EntityType): string {
+		switch (entityType) {
+			case "BROWSER_APPLICATION_ENTITY": {
+				return "JAVA_SCRIPT_ERROR";
+			}
+			case "MOBILE_APPLICATION_ENTITY": {
+				return "MOBILE_CRASH";
+			}
+			default: {
+				return "TRANSACTION_ERROR";
+			}
+		}
+	}
+
+	@log()
+	async getErrorGroupDetails(errorTrace: BaseError, entityType: EntityType) {
+		const source = this.getSourceType(entityType);
+		// There are fields that the nerdgraph can't handle - remove them before sending in rawEvent
+		const prunedEvent: any = { ...errorTrace };
+		delete prunedEvent.facet;
+		delete prunedEvent.length;
+		delete prunedEvent.traceId;
+		delete prunedEvent.appName;
 		try {
-			return this.graphqlClient.query(
-				`query getErrorGroupGuid($name: String!, $message:String!, $entityGuid:EntityGuid!) {
-				actor {
-				  errorsInbox {
-					errorGroup(errorEvent: {name: $name,
-					  message: $message,
-					  entityGuid: $entityGuid}) {
-					  id
-					  url
+			const query = `query getErrorGroupGuid(
+				$source: ErrorsInboxEventSource!,
+				$entityGuid: EntityGuid!,
+				$rawEvent: ErrorsInboxRawEvent!) {
+					actor {
+						errorsInbox {
+							errorGroup(errorEvent: { 
+									source: $source,
+									entityGuid: $entityGuid, 
+									event: $rawEvent 
+								})
+								{
+									id
+									url
+							}
+						}
 					}
-				  }
-				}
-			  }`,
-				{
-					name: name,
-					message: message,
-					entityGuid: entityGuid,
-				}
-			);
+			  }`;
+			return this.graphqlClient.query(query, {
+				source: source,
+				rawEvent: prunedEvent,
+				entityGuid: errorTrace.entityGuid,
+			});
 		} catch (ex) {
 			ContextLogger.error(ex, "getErrorGroupFromNameMessageEntity", {
-				name,
-				message,
+				errorTrace,
 			});
 			return undefined;
 		}
 	}
 
-	@log({ timed: true })
+	@log()
 	private async getErrorsInboxAssignments(
 		emailAddress: string,
 		userId?: number
@@ -290,11 +418,18 @@ export class ObservabilityErrorsProvider {
 				// TODO fix me. remove this once we have a userId on a connection
 				userId = await this.graphqlClient.getUserId();
 			}
+
+			const endTime = new Date().getTime();
+			const startTime = endTime - 30 * 24 * 60 * 60 * 1000; // 30 days ago
+
 			return this.graphqlClient.query(
-				`query getAssignments($userId: Int, $emailAddress: String!) {
+				`query getAssignments($userId: Int, $emailAddress: String!, $startTime: EpochMilliseconds!, $endTime: EpochMilliseconds!) {
 				actor {
 				  errorsInbox {
-					errorGroups(filter: {isAssigned: true, assignment: {userId: $userId, userEmail: $emailAddress}}) {
+					errorGroups(
+					filter: {isAssigned: true, assignment: {userId: $userId, userEmail: $emailAddress}, states: UNRESOLVED}
+					timeWindow: {endTime: $endTime, startTime: $startTime}
+					sortBy: {field: LAST_OCCURRENCE_IN_WINDOW, direction: DESC}) {
 					  results {
 						url
 						state
@@ -302,6 +437,7 @@ export class ObservabilityErrorsProvider {
 						message
 						id
 						entityGuid
+						lastSeenAt
 					  }
 					}
 				  }
@@ -310,6 +446,8 @@ export class ObservabilityErrorsProvider {
 				{
 					userId: userId,
 					emailAddress: emailAddress,
+					startTime: startTime,
+					endTime: endTime,
 				}
 			);
 		} catch (ex) {
@@ -334,9 +472,12 @@ export class ObservabilityErrorsProvider {
 	 * 		  }
 	 * 		| undefined
 	 * 	>)}
-	 * @memberof NewRelicProvider
+	 * @memberof ObservabilityErrorsProvider
 	 */
-	private async getMetricData(errorGroupGuid: string): Promise<
+	private async getMetricData(
+		errorGroupGuid: string,
+		lastSeenAt?: number
+	): Promise<
 		| {
 				entityGuid: string;
 				traceId?: string;
@@ -352,7 +493,7 @@ export class ObservabilityErrorsProvider {
 
 			const accountId = parseId(errorGroupGuid)?.accountId!;
 
-			const errorGroupResponse = await this.fetchErrorGroupById(errorGroupGuid);
+			const errorGroupResponse = await this.fetchErrorGroupById(errorGroupGuid, lastSeenAt);
 
 			if (!errorGroupResponse) {
 				ContextLogger.warn("fetchErrorGroupDataById missing errorGroupGuid");
@@ -394,6 +535,7 @@ export class ObservabilityErrorsProvider {
 							results: {
 								entityGuid: string;
 								id?: string;
+								traceId?: string;
 								stackHash?: string;
 								stackTrace?: string;
 								monitorAccountId?: string;
@@ -412,6 +554,7 @@ export class ObservabilityErrorsProvider {
 					stackHash?: string | number;
 					browserStackHash?: string | number;
 					id?: string;
+					traceId?: string;
 					stackTrace?: string;
 					monitorAccountId?: string;
 					appId?: number;
@@ -436,7 +579,7 @@ export class ObservabilityErrorsProvider {
 						errorTraceResult.appId &&
 						errorTraceResult.releaseIds
 					) {
-						stackSourceMap = await this.fetchSourceMap(
+						stackSourceMap = await this.sourceMapProvider.fetchSourceMap(
 							errorTraceResult.stackTrace,
 							errorTraceResult.monitorAccountId,
 							errorTraceResult.appId,
@@ -460,7 +603,7 @@ export class ObservabilityErrorsProvider {
 					}
 					return {
 						entityGuid: entityGuid || errorGroupResponse.entityGuid,
-						traceId: returnTraceId,
+						traceId: returnTraceId || errorTraceResult.traceId,
 						stackSourceMap,
 					};
 				}
@@ -471,138 +614,6 @@ export class ObservabilityErrorsProvider {
 			});
 		}
 		return undefined;
-	}
-
-	private async fetchSourceMap(
-		stackTrace: string,
-		monitorAccountId: string,
-		appId: number,
-		releaseIds: string
-	): Promise<any> {
-		let serviceUrlChunk = "service";
-		if (this.nrApiConfig.productUrl.includes("staging")) {
-			serviceUrlChunk = "staging-service";
-		}
-
-		const url = `https://sourcemaps.${serviceUrlChunk}.newrelic.com/ui/accounts/${monitorAccountId}/applications/${appId}/stacktraces?releaseIds=${encodeURIComponent(
-			releaseIds
-		)}`;
-
-		let headers: { [key: string]: string } = {
-			"Content-Type": "text/plain",
-		};
-
-		const token = this.providerInfo?.accessToken;
-		if (token) {
-			if (this.providerInfo?.tokenType === "access") {
-				headers["x-access-token"] = token;
-			} else {
-				headers["x-id-token"] = token;
-			}
-		}
-
-		try {
-			const response = await customFetch(url, {
-				method: "POST",
-				headers: headers,
-				body: stackTrace,
-			});
-
-			if (!response.ok) {
-				throw new Error(`HTTP error! Status: ${response.status}`);
-			}
-			const responseData = await response.json();
-			return responseData;
-		} catch (error) {
-			ContextLogger.error(error, "fetchSourceMap");
-		}
-
-		return undefined;
-	}
-
-	private getFingerprintedErrorTraceQueries(
-		applicationGuid: String,
-		entityType?: EntityType,
-		timeWindow?: string
-	): String[] {
-		const since = timeWindow ? `${timeWindow} ago` : "3 days ago";
-		const apmNrql = [
-			"SELECT",
-			"sum(count) AS 'count',", // first field is used to sort with FACET
-			"latest(timestamp) AS 'lastOccurrence',",
-			"latest(id) AS 'occurrenceId',",
-			"latest(appName) AS 'appName',",
-			"latest(error.class) AS 'errorClass',",
-			"latest(message) AS 'message',",
-			"latest(entityGuid) AS 'entityGuid',",
-			"latest(fingerprint) AS 'fingerprintId',",
-			"count(id) AS 'length'",
-			"FROM ErrorTrace",
-			`WHERE fingerprint IS NOT NULL AND NOT error.expected AND entityGuid='${applicationGuid}'`,
-			"FACET error.class, message", // group the results by identifiers
-			`SINCE ${since}`,
-			"LIMIT MAX",
-		].join(" ");
-
-		const browserNrql = [
-			"SELECT",
-			"count(*) as 'count',", // first field is used to sort with FACET
-			"latest(timestamp) AS 'lastOccurrence',",
-			"latest(stackHash) AS 'occurrenceId',",
-			"latest(appName) AS 'appName',",
-			"latest(errorClass) AS 'errorClass',",
-			"latest(errorMessage) AS 'message',",
-			"latest(entityGuid) AS 'entityGuid',",
-			"count(guid) as 'length'",
-			"FROM JavaScriptError",
-			`WHERE stackHash IS NOT NULL AND entityGuid='${applicationGuid}'`,
-			"FACET stackTrace", // group the results by fingerprint
-			`SINCE ${since}`,
-			"LIMIT MAX",
-		].join(" ");
-
-		const mobileNrql1 = [
-			"SELECT",
-			"count(occurrenceId) as 'count',", // first field is used to sort with FACET
-			"latest(timestamp) AS 'lastOccurrence',",
-			"latest(occurrenceId) AS 'occurrenceId',",
-			"latest(appName) AS 'appName',",
-			"latest(crashLocationClass) AS 'errorClass',",
-			"latest(crashMessage) AS 'message',",
-			"latest(entityGuid) AS 'entityGuid',",
-			"count(occurrenceId) as 'length'",
-			"FROM MobileCrash",
-			`WHERE entityGuid='${applicationGuid}'`,
-			"FACET crashFingerprint", // group the results by fingerprint
-			`SINCE ${since}`,
-			"LIMIT MAX",
-		].join(" ");
-
-		const mobileNrql2 = [
-			"SELECT",
-			"count(handledExceptionUuid) as 'count',", // first field is used to sort with FACET
-			"latest(timestamp) AS 'lastOccurrence',",
-			"latest(handledExceptionUuid) AS 'occurrenceId',",
-			"latest(appName) AS 'appName',",
-			"latest(exceptionLocationClass) AS 'errorClass',",
-			"latest(exceptionMessage) AS 'message',",
-			"latest(entityGuid) AS 'entityGuid',",
-			"count(handledExceptionUuid) as 'length'",
-			"FROM MobileHandledException",
-			`WHERE entityGuid='${applicationGuid}'`,
-			"FACET handledExceptionUuid", // group the results by fingerprint
-			`SINCE ${since}`,
-			"LIMIT MAX",
-		].join(" ");
-
-		switch (entityType) {
-			case "BROWSER_APPLICATION_ENTITY":
-				return [browserNrql];
-			case "MOBILE_APPLICATION_ENTITY":
-				return [mobileNrql1, mobileNrql2];
-			default:
-				return [apmNrql];
-		}
 	}
 
 	setAssigneeByEmail(request: { errorGroupGuid: string; emailAddress: string }) {
@@ -751,7 +762,7 @@ export class ObservabilityErrorsProvider {
 				  exception(occurrenceId: $occurrenceId) {
 					stackTrace {
 					  frames {
-						filepath						
+						filepath
 						formatted
 						line
 						name
@@ -761,7 +772,7 @@ export class ObservabilityErrorsProvider {
 				  crash(occurrenceId: $occurrenceId) {
 					stackTrace {
 					  frames {
-						filepath						
+						filepath
 						formatted
 						line
 						name
@@ -997,9 +1008,7 @@ export class ObservabilityErrorsProvider {
 	}
 
 	@lspHandler(GetObservabilityErrorGroupMetadataRequestType)
-	@log({
-		timed: true,
-	})
+	@log()
 	async getErrorGroupMetadata(
 		request: GetObservabilityErrorGroupMetadataRequest
 	): Promise<GetObservabilityErrorGroupMetadataResponse | undefined> {
@@ -1007,18 +1016,19 @@ export class ObservabilityErrorsProvider {
 
 		try {
 			if (request.errorGroupGuid) {
-				const metricResponse = await this.getMetricData(request.errorGroupGuid);
+				const metricResponse = await this.getMetricData(request.errorGroupGuid, request.lastSeenAt);
 				if (!metricResponse) return undefined;
 
 				const mappedRepoEntities = await this.reposProvider.findMappedRemoteByEntity(
-					metricResponse?.entityGuid
+					metricResponse.entityGuid
 				);
 				return {
 					entityId: metricResponse?.entityGuid,
+					traceId: metricResponse?.traceId,
 					occurrenceId: metricResponse?.traceId,
 					stackSourceMap: metricResponse?.stackSourceMap,
-					relatedRepos: mappedRepoEntities || [],
-				} as GetObservabilityErrorGroupMetadataResponse;
+					relatedRepos: mappedRepoEntities ?? [],
+				};
 			}
 
 			if (request.entityGuid) {
@@ -1027,8 +1037,8 @@ export class ObservabilityErrorsProvider {
 				);
 				return {
 					entityId: request.entityGuid,
-					relatedRepos: mappedRepoEntities || [],
-				} as GetObservabilityErrorGroupMetadataResponse;
+					relatedRepos: mappedRepoEntities ?? [],
+				};
 			}
 		} catch (ex) {
 			ContextLogger.error(ex, "getErrorGroupMetadata", {
@@ -1045,12 +1055,10 @@ export class ObservabilityErrorsProvider {
 	 *
 	 * @param {GetObservabilityErrorAssignmentsRequest} request
 	 * @return {Promise<GetObservabilityErrorAssignmentsResponse>}
-	 * @memberof NewRelicProvider
+	 * @memberof ObservabilityErrorsProvider
 	 */
 	@lspHandler(GetObservabilityErrorAssignmentsRequestType)
-	@log({
-		timed: true,
-	})
+	@log()
 	async getObservabilityErrorAssignments(
 		request: GetObservabilityErrorAssignmentsRequest
 	): Promise<GetObservabilityErrorAssignmentsResponse> {
@@ -1062,20 +1070,16 @@ export class ObservabilityErrorsProvider {
 
 			const result = await this.getErrorsInboxAssignments(me.email);
 			if (result) {
-				response.items = result.actor.errorsInbox.errorGroups.results
-					.filter(_ => {
-						// dont show IGNORED or RESOLVED errors
-						return !_.state || _.state === "UNRESOLVED";
-					})
-					.map((_: any) => {
-						return {
-							entityId: _.entityGuid,
-							errorGroupGuid: _.id,
-							errorClass: _.name,
-							message: _.message,
-							errorGroupUrl: _.url,
-						} as ObservabilityErrorCore;
-					});
+				response.items = result.actor.errorsInbox.errorGroups.results.map(_ => {
+					return {
+						entityId: _.entityGuid,
+						errorGroupGuid: _.id,
+						errorClass: _.name,
+						message: _.message,
+						errorGroupUrl: _.url,
+						lastSeenAt: _.lastSeenAt,
+					} as ObservabilityErrorCore;
+				});
 
 				if (response.items && response.items.find(_ => !_.errorClass)) {
 					ContextLogger.warn("getObservabilityErrorAssignments has empties", {
@@ -1111,7 +1115,7 @@ export class ObservabilityErrorsProvider {
 			const parsedId = parseId(errorGroupGuid)!;
 			accountId = parsedId?.accountId;
 
-			let errorGroupFullResponse;
+			let errorGroupFullResponse: ErrorGroupResponse | undefined;
 
 			if (request.entityGuid) {
 				entityGuid = request.entityGuid;
@@ -1250,7 +1254,7 @@ export class ObservabilityErrorsProvider {
 					errorGroupGuid: errorGroup.guid,
 					occurrenceId: request.occurrenceId,
 					entityGuid: entityGuid,
-					hasErrorGroup: errorGroup != null,
+					hasErrorGroup: !!errorGroup,
 					hasStackTrace: errorGroup?.hasStackTrace === true,
 				});
 			} else {

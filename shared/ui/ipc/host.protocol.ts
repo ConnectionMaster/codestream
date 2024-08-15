@@ -2,12 +2,12 @@ import {
 	ApiVersionCompatibility,
 	Capabilities,
 	CodeStreamEnvironmentInfo,
-	EntityAccount,
+	ObservabilityAnomaly,
 	ThirdPartyProviders,
-	Unreads,
 	VersionCompatibility,
 } from "@codestream/protocols/agent";
 import {
+	CLMSettings,
 	CSApiCapabilities,
 	CSCompany,
 	CSMarker,
@@ -29,6 +29,9 @@ export interface Collaborator {
 	};
 }
 
+export type IdeNames = "VSC" | "VS" | "JETBRAINS";
+export type BrowserEngines = "JCEF" | "JxBrowser" | "DotNetBrowser";
+
 export interface BootstrapInHostResponse {
 	capabilities: Capabilities;
 	configs: {
@@ -38,7 +41,7 @@ export interface BootstrapInHostResponse {
 	context: Partial<WebviewContext>;
 	environmentInfo?: CodeStreamEnvironmentInfo;
 	ide?: {
-		name: string | undefined;
+		name?: IdeNames;
 		detail: string | undefined;
 	};
 	session: SessionState;
@@ -63,13 +66,13 @@ export interface SignedInBootstrapData extends BootstrapInHostResponse {
 	teams: CSTeam[];
 	companies: CSCompany[];
 	users: CSUser[];
-	unreads: Unreads;
 	providers: ThirdPartyProviders;
 }
 
 export enum LogoutReason {
 	Unknown = "unknown",
 	ReAuthenticating = "reAuthenticating",
+	InvalidRefreshToken = "InvalidRefreshToken",
 }
 
 export interface LogoutRequest {
@@ -169,8 +172,28 @@ export const SaveFileRequestType = new RequestType<SaveFileRequest, SaveFileResp
 	`${IpcRoutes.Host}/file/save`
 );
 
+export interface OpenErrorGroupRequest {
+	errorGroupGuid: string;
+	occurrenceId: string;
+	lastOccurrence: number;
+	sessionStart?: number;
+	openType: string;
+	remote?: string;
+	entityId: string;
+}
+export interface OpenErrorGroupResponse {
+	success: boolean;
+}
+
+export const OpenErrorGroupRequestType = new RequestType<
+	OpenErrorGroupRequest,
+	OpenErrorGroupResponse,
+	void,
+	void
+>(`${IpcRoutes.Host}/errorGroup/open`);
+
 export interface OpenInBufferRequest {
-	contentType: "json" | "plaintext";
+	contentType: "json" | "csv";
 	data: any;
 }
 export interface OpenInBufferResponse {
@@ -317,25 +340,40 @@ export enum ViewColumn {
 }
 
 export interface OpenEditorViewNotification {
-	panel: "logs" | "nrql";
+	panel: "anomaly" | "logs" | "nrql" | "whatsnew";
 	title: string;
-	accountId?: number;
-
-	entityAccounts: EntityAccount[];
-	entryPoint:
-		| "global_nav"
+	entryPoint: // logs
+	| "global_nav"
 		| "context_menu"
 		| "tree_view"
-		| "codelens"
+		| "open_in_ide"
+		| "code_error"
 		// nrql
 		| "query_builder"
 		| "recent_queries"
-		| "nrql_file";
-
+		| "nrql_file"
+		// other
+		| "notification"
+		| "golden_metrics"
+		| "profile"
+		| "entity_guid_finder";
+	ide: {
+		name?: IdeNames;
+		browserEngine?: BrowserEngines;
+	};
+	accountId?: number;
 	panelLocation?: ViewColumn;
 	entityGuid?: string;
 	query?: string;
 	hash?: string;
+	traceId?: string;
+	entityName?: string;
+	anomaly?: ObservabilityAnomaly;
+	clmSettings?: CLMSettings;
+	isProductionCloud?: boolean;
+	nrAiUserId?: string;
+	userId?: string;
+	demoMode?: boolean;
 }
 
 export const OpenEditorViewNotificationType = new NotificationType<

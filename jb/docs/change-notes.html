@@ -1,3 +1,151 @@
+<h4 id="15_14_0">15.14.0</h4>
+<h5>Changed</h5>
+<ul>
+	<li>You can now mention anyone in your New Relic organization when commenting on an error, and you can also assign the error to anyone</li>
+</ul>
+<h5>Fixed</h5>
+<ul>
+	<li>Fixes an issue with the Assigned to Me section only showing errors occurring within the last 30 minutes</li>
+	<li>Explore this Data button when hovering over a Golden Metric now works for non-APM services</li>
+	<li>Fixes an issue where all facets weren't being displayed when there were multiple facets in a query</li>
+</ul>
+<h4 id="15_13_1">15.13.1</h4>
+<h5>Changed</h5>
+<ul>
+	<li>Fix migrated AI posts not showing up</li>
+	<li>Fix issue with getting logged out after closing IDE</li>
+</ul>
+<h4 id="15_13_0">15.13.0</h4>
+<h5>Changed</h5>
+<ul>
+	<li>Update extensions for new API server</li>
+</ul>
+<h4 id="15_12_0">15.12.0</h4>
+<h5>Changed</h5>
+<ul>
+	<li>Error discussions are now tied to New Relic's collaboration tools, with discussions accessible from both CodeStream and New Relic on the web</li>
+</ul>
+<h5>Fixed</h5>
+<ul>
+	<li>Fixes an issue with FACET value duplicated in query results in table visualization</li>
+	<li>Fixes an issue with the submission of queries via the Enter key changing the account selection</li>
+	<li>Fixes an issue with the display of charts in code-level metrics details view in JetBrains IDEs</li>
+</ul>
+<h4 id="15_11_0">15.11.0</h4>
+<h5>Added</h5>
+<ul>
+	<li>Adds support for double quotes in NRQL queries</li>
+</ul>
+<h5>Fixed</h5>
+<ul>
+	<li>Fixes an issue with the Enter key not submitting queries when no repositories are open</li>
+</ul>
+<h4 id="15_10_0">15.10.0</h4>
+<h5>Added</h5>
+<ul>
+	<li>Adds service search, allowing you to see observability data for any service, even when you don't have the repository open in your IDE</li>
+</ul>
+<h4 id="15_9_0">15.9.0</h4>
+<h5>Added</h5>
+<ul>
+	<li>Adds support for stacked bar charts for query results</li>
+</ul>
+<h5>Changed</h5>
+<ul>
+	<li>Queries can now be submitted via the Enter key, with Shift+Enter creating a newline</li>
+	<li>Details for transaction anomalies are now displayed in a new webview in the editor group, with relevant errors, critical path analysis or database queries included as appropriate</li>
+	<li>Desktop notifications for transaction anomalies have been turned off, with new email notifications coming soon</li>
+</ul>
+<h5>Fixed</h5>
+<ul>
+	<li>Fixes an issue rendering query results as pie charts</li>
+	<li>Fixes an issue with labels missing from bar charts</li>
+	<li>Fixes an issue with slashes in queries not being properly escaped</li>
+	<li>Fixes an issue where adding TIMESERIES to a query generated a table by default instead of a line chart</li>
+</ul>
+<h4 id="15_8_1">15.8.1</h4>
+<h5>Fixed</h5>
+<ul>
+	<li>Fixes on issue when open-in-IDE from Logs attempts to load logs prior to the user loggging in</li>
+</ul>
+<h4 id="15_8_0">15.8.0</h4>
+<h5>Changed</h5>
+<ul>
+	<li>The codemarks feature (comments and issues) has been removed from the service</li>
+	<li>A new Summary section has been added to the tree view, with issues, golden metrics, SLOs and related services consolidated underneath it</li>
+	<li>The recent queries dropdown in the query builder has been expanded for easier viewing</li>
+	<li>The display of query results is now limited to a single line in height, with a new copy button added and the complete cell value displayed in a tooltip on hover</li>
+</ul>
+<h5>Fixed</h5>
+<ul>
+	<li>Fixes issues with language detection in the instrumentation wizard</li>
+</ul>
+<h4 id="15_7_0">15.7.0</h4>
+<h5>Changed</h5>
+<ul>
+	<li>Improved UX for service and account pickers</li>
+</ul>
+<h5>Fixed</h5>
+<ul>
+	<li>Fixes an issue where NRAI would suggest a code fix when one wasn't needed</li>
+	<li>Fixes an issue where the query builder wouldn't wrap text</li>
+	<li>Fixes an issue where a log search submitted via Enter key would get re-submitted</li>
+	<li>Fixes an issue where open-in-IDE would work if IDE wasn't already running</li>
+</ul>
+<h4 id="15_6_0">15.6.0</h4>
+<h5>Added</h5>
+<ul>
+	<li>Adds repository as the top-level node in the CodeStream tree view, allowing you to see observability for services related to any repository you have open in your IDE</li>
+	<li>Add the ability to search logs for any entity, including infra logs</li>
+	<li>Adds support for partitions when searching logs</li>
+	<li>Adds a link to related logs when viewing error details</li>
+</ul>
+<h5>Fixed</h5>
+<ul>
+	<li>Fixes an issue with the display of markdown when viewing vulnerability details</li>
+	<li>Fixes an issue where the state of the severity filter for vulnerabilities was not being persisted</li>
+</ul>
+<h4 id="15_5_0">15.5.0</h4>
+<h5>Added</h5>
+<ul>
+	<li>Adds information about the slowest operations when viewing the details of a poorly performing transaction</li>
+	<li>Adds links to charts when hovering over any golden metric for a service</li>
+	<li>Adds auto-complete when entering queries in a NRQL file</li>
+</ul>
+<h4 id="15_4_0">15.4.0</h4>
+<h5>Added</h5>
+<ul>
+	<li>Ability to show surrounding logs when viewing log search results</li>
+	<li>Syntax highlighting in `.nrql` files</li>
+	<li>Abiity to export log search results to JSON or CSV</li>
+	<li>Extension support for "Open in IDE" from a span in distributed tracing on New Relic</li>
+</ul>
+<h5>Changed</h5>
+<ul>
+	<li>Updated UX for when a user's auth token expires and can't be refreshed</li>
+	<li>When associating a repo with a service on New Relic, services already associated with the repo are no longer listed</li>
+	<li>All sections of the CodeStream pane are now collapsed by default for new users</li>
+</ul>
+<h5>Fixed</h5>
+<ul>
+	<li>Fixes an issue where creating an issue on Shortcut would result in duplicate issues</li>
+	<li>Addresses <a href="https://github.com/TeamCodeStream/codestream/issues/1869">#1869</a> - OTel service not recognized</li>
+</ul>
+<h4 id="15_3_0">15.3.0</h4>
+<h5>Added</h5>
+<ul>
+	<li>Adds the ability to search logs, with initial support for logs collected via APM or OTel</li>
+	<li>Adds the ability to run NRQL queries, with support for multiple visualizations and the ability to export to CSV and JSON</li>
+	<li>Adds the ability to save and share NRQL queries via `.nrql` files</li>
+	<li>Adds code-level metrics support for Node anonymous functions, which require you to send build SHA information either via New Relic's change tracking or via environment variable in your build pipeline</li>
+	<li>Adds a "What's New" page under username > Help that covers recently added features</li>
+</ul>
+<h4 id="15_2_0">15.2.0</h4>
+<h5>Changed</h5>
+<ul>
+	<li>A new "Apply Fix" button allows you to easily accept a suggested code fix when NRAI analyzes an error for you</li>
+	<li>Code fixes suggested by NRAI are now presented in a diff view</li>
+</ul>
 <h4 id="15_1_1">15.1.1</h4>
 <h5>Fixed</h5>
 <ul>

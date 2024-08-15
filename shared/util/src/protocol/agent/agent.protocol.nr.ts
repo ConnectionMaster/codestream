@@ -57,6 +57,7 @@ export interface ResolveStackTraceResponse {
 	parsedStackInfo?: CSStackTraceInfo; // this is parsed info relative to the given sha, to be stored
 	resolvedStackInfo?: CSStackTraceInfo; // this is relative to the user's current sha, ephemeral
 	warning?: WarningOrError;
+	notification?: WarningOrError;
 	error?: string;
 }
 
@@ -82,7 +83,7 @@ export const DidResolveStackTraceLineNotificationType = new NotificationType<
 export interface ResolveStackTracePositionRequest {
 	ref?: string;
 	repoId: string;
-	filePath: string;
+	fileRelativePath: string;
 	line?: number;
 	column?: number;
 }
@@ -224,3 +225,16 @@ export type LookupNewRelicOrganizationsResponse = {
 	accountId: number;
 	orgId: number;
 }[];
+
+export interface DetectTeamAnomaliesRequest {}
+
+export interface DetectTeamAnomaliesResponse {
+	[key: string]: any;
+}
+
+export const DetectTeamAnomaliesRequestType = new RequestType<
+	DetectTeamAnomaliesRequest,
+	DetectTeamAnomaliesResponse,
+	void,
+	void
+>("codestream/detectTeamAnomalies");

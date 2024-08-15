@@ -3,10 +3,12 @@ import {
 	EditorCopySymbolRequest,
 	EditorCopySymbolResponse,
 	EditorReplaceSymbolRequest,
-	EditorReplaceSymbolResponse
+	EditorReplaceSymbolResponse,
+	EditorUndoRequest,
+	EditorUndoResponse
 } from "@codestream/protocols/webview";
 import { Editor } from "extensions";
-import { Uri, commands, Range, DocumentSymbol } from "vscode";
+import { Uri, commands, Range, DocumentSymbol, window } from "vscode";
 import { CancellationTokenSource } from "vscode-languageclient";
 import { BuiltInCommands } from "../constants";
 import { Logger } from "logger";
@@ -31,26 +33,44 @@ function findSymbol(
 	return undefined;
 }
 
+export async function editorUndo(params: EditorUndoRequest): Promise<EditorUndoResponse> {
+	const editor = await Editor.getActiveOrVisible();
+	if (!editor) {
+		return { success: false };
+	}
+	window.showTextDocument(editor.document); // Try to focus the editor so the undo works
+	for (let i = 0; i < params.times; i++) {
+		await commands.executeCommand("undo");
+		if (params.times > 1) {
+			await new Promise(resolve => setTimeout(resolve, 1500)); // wait 1.5 seconds between undos - must be an epic debounce somewhere
+		}
+	}
+	return { success: true };
+}
+
 export async function copySymbol(
 	params: EditorCopySymbolRequest
 ): Promise<EditorCopySymbolResponse> {
 	try {
 		const editor = await Editor.findOrOpenEditor(Uri.parse(params.uri));
 		if (!editor?.document) {
+			Logger.log("copySymbol: exiting: !editor?.document");
 			return { success: false };
 		}
 		const symbols = await symbolLocator.locate(
 			editor?.document,
 			new CancellationTokenSource().token
 		);
+		Logger.log(`copySymbol: got ${symbols.allSymbols.length} symbols`);
 		const symbol = findSymbol(symbols, params.symbolName);
 		if (!symbol) {
+			Logger.log(`copySymbol: exiting: did not find symbol ${params.symbolName}`);
 			return {
 				success: false
 			};
 		}
 
-		// Logger.warn(`Found symbol ${JSON.stringify(symbol)}`);
+		Logger.log(`copySymbol: found symbol ${params.symbolName}`);
 		const theText = editor.document.getText(symbol.range);
 		return {
 			success: true,

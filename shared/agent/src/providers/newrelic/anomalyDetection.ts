@@ -49,7 +49,7 @@ export class AnomalyDetector {
 	private _releaseBased = false;
 
 	async execute(): Promise<GetObservabilityAnomaliesResponse> {
-		const mockResponse = getAnomalyDetectionMockResponse(this._request);
+		const mockResponse = getAnomalyDetectionMockResponse(this._request.entityGuid);
 		if (mockResponse) {
 			await this.notifyNewAnomalies(mockResponse.responseTime, mockResponse.errorRate, true);
 			return mockResponse;
@@ -129,7 +129,7 @@ export class AnomalyDetector {
 				languageSupport,
 				benchmarkSampleSizes,
 				benchmarkSpans,
-				this._request.minimumErrorRate,
+				this._request.minimumErrorPercentage,
 				this._request.minimumSampleRate,
 				this._request.minimumRatio
 			);
@@ -188,34 +188,6 @@ export class AnomalyDetector {
 		// 	allOtherAnomalies.push(anomaly);
 		// }
 		// allOtherAnomalies.sort((a, b) => a.name.localeCompare(b.name));
-
-		try {
-			const telemetry = Container.instance().telemetry;
-			telemetry?.track({
-				eventName: "codestream/anomalies calculated",
-				properties: {
-					entity_guid: this._request.entityGuid,
-					account_id: this._accountId,
-					meta_data: `language: ${languageSupport.language ?? "<unknown>"}`,
-
-					meta_data_2: `anomalous_duration_transactions: ${
-						!this._observabilityRepo?.hasCodeLevelMetricSpanData ? durationAnomalies.length : 0
-					}`,
-					meta_data_3: `anomalous_error_transactions: ${
-						!this._observabilityRepo?.hasCodeLevelMetricSpanData ? errorRateAnomalies.length : 0
-					}`,
-					meta_data_4: `anomalous_duration_metrics: ${
-						this._observabilityRepo?.hasCodeLevelMetricSpanData ? durationAnomalies.length : 0
-					}`,
-					meta_data_5: `anomalous_error_metrics: ${
-						this._observabilityRepo?.hasCodeLevelMetricSpanData ? errorRateAnomalies.length : 0
-					}`,
-					event_type: "state_load",
-				},
-			});
-		} catch (e) {
-			Logger.warn("Error generating anomaly detection telemetry", e);
-		}
 
 		let didNotifyNewAnomalies = false;
 		if (this._request.notifyNewAnomalies) {

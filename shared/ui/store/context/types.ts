@@ -2,13 +2,11 @@ import {
 	EntityAccount,
 	MetricTimesliceNameMapping,
 	ObservabilityAnomaly,
-	RepoProjectType,
 } from "@codestream/protocols/agent";
-import { CodemarkType } from "@codestream/protocols/api";
+import { CodemarkType, WebviewPanels } from "@codestream/protocols/api";
 
 import { NewPullRequestBranch } from "@codestream/protocols/webview";
 import { WebviewContext, WebviewModals } from "@codestream/webview/ipc/webview.protocol.common";
-import { WebviewPanels } from "@codestream/protocols/api";
 import { AnyObject } from "@codestream/webview/utils";
 
 export enum ContextActionsType {
@@ -44,7 +42,7 @@ export enum ContextActionsType {
 	RepositionCodemark = "@context/RepositionCodemark",
 	SetCurrentReview = "@context/SetCurrentReview",
 	SetCurrentReviewOptions = "@context/SetCurrentReviewOptions",
-	SetCurrentCodeError = "@context/SetCurrentCodeError",
+	SetCurrentCodeErrorData = "@context/SetCurrentCodeErrorData",
 	SetCurrentRepo = "@context/SetCurrentRepo",
 	SetCreatePullRequest = "@context/SetCreatePullRequest",
 	SetCurrentPullRequest = "@context/SetCurrentPullRequest",
@@ -52,20 +50,19 @@ export enum ContextActionsType {
 	SetCurrentPullRequestNeedsRefresh = "@context/SetCurrentPullRequestNeedsRefresh",
 	SetCurrentErrorsInboxOptions = "@context/SetCurrentErrorsInboxOptions",
 	SetCurrentInstrumentationOptions = "@context/SetCurrentInstrumentationOptions",
+	SetCurrentServiceSearchEntity = "@context/SetCurrentServiceSearchEntity",
 	SetCurrentPixieDynamicLoggingOptions = "@context/SetCurrentPixieDynamicLoggingOptions",
 	SetCurrentPullRequestAndBranch = "@context/SetCurrentPullRequestAndBranch",
 	SetNewPullRequestOptions = "@context/SetNewPullRequestOptions",
 	SetStartWorkCard = "@context/SetStartWorkCard",
-	SetOnboardStep = "@context/SetOnboardStep",
 	SetIsFirstPageview = "@context/SetIsFirstPageview",
 	SetPendingProtocolHandlerUrl = "@context/SetPendingProtocolHandlerUrl",
-	SetWantNewRelicOptions = "@context/SetWantNewRelicOptions",
-	SetClearNewRelicOptions = "@context/SetClearNewRelicOptions",
 	SetCurrentMethodLevelTelemetry = "@context/SetCurrentMethodLevelTelemetry",
 	SetCurrentObservabilityAnomaly = "@context/SetCurrentObservabilityAnomaly",
 	SetEntityAccounts = "@context/SetEntityAccounts",
 	SetCurrentTransactionSpan = "@context/SetCurrentTransactionSpan",
 	SetCurrentAPMLoggingSearchContext = "@context/SetCurrentObservabilityLogSearchContext",
+	SetCurrentEntityGuid = "@context/SetCurrentEntityGuid",
 }
 
 /**
@@ -81,13 +78,6 @@ export type PostEntryPoint =
 	| string
 	| undefined;
 
-export interface WantNewRelicOptions {
-	projectType: RepoProjectType;
-	repoId?: string;
-	path?: string;
-	projects?: { path: string; name?: string; version?: string }[];
-}
-
 export interface ContextState extends WebviewContext {
 	channelFilter: string;
 	channelsMuteAll: boolean;
@@ -97,7 +87,7 @@ export interface ContextState extends WebviewContext {
 	codemarkTagFilter: string;
 	codemarkBranchFilter: string;
 	codemarkAuthorFilter: string;
-
+	currentServiceSearchEntity?: string;
 	codemarksFileViewStyle: "list" | "inline";
 	codemarksShowArchived: boolean;
 	codemarksShowResolved: boolean;
@@ -137,7 +127,6 @@ export interface ContextState extends WebviewContext {
 	};
 	errorsInboxOptions?: { stack?: string; customAttributes?: string; url?: string };
 
-	wantNewRelicOptions?: WantNewRelicOptions;
 	currentMethodLevelTelemetry?: CurrentMethodLevelTelemetry;
 	currentObservabilityAnomaly?: ObservabilityAnomaly;
 	currentObservabilityAnomalyEntityGuid?: string;
@@ -147,6 +136,7 @@ export interface ContextState extends WebviewContext {
 	entityAccounts?: EntityAccount[];
 
 	selectedRegion?: string;
+	currentEntityGuid?: string;
 }
 
 export type ChatProviderAccess = "strict" | "permissive";
@@ -197,9 +187,12 @@ export interface CurrentTransactionSpan {
 	newRelicEntityGuid?: string;
 	newRelicAccountId?: number;
 	spanId?: string;
+	traceId?: string;
 	spanName?: string;
 	spanHost?: string;
+	entityName?: string;
 	url?: string;
+	language?: string;
 	codeNamespace?: string;
 	functionName?: string;
 	filePath?: string;

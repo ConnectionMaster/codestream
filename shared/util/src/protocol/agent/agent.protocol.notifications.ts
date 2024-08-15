@@ -73,7 +73,8 @@ export enum ChangeDataType {
 	ApiCapabilities = "apiCapabilities",
 	Workspace = "workspace",
 	AsyncError = "asyncError",
-	GrokStream = "grokStream",
+	// GrokStream = "grokStream",
+	AnomalyData = "anomalyData"
 }
 
 export interface CodemarksChangedNotification {
@@ -104,29 +105,29 @@ export interface CSAsyncError {
 	};
 }
 
-export interface CSAsyncGrokError extends CSAsyncError {
-	extra: {
-		codeErrorId: string;
-		topmostPostId: string;
-		postId?: string;
-		streamId?: string;
-	};
-}
+// export interface CSAsyncGrokError extends CSAsyncError {
+// 	extra: {
+// 		codeErrorId: string;
+// 		topmostPostId: string;
+// 		postId?: string;
+// 		streamId?: string;
+// 	};
+// }
 
-export interface CSGrokStream {
-	sequence: number;
-	content?: {
-		content: string;
-		role: string;
-	};
-	extra: {
-		topmostPostId: string;
-		codeErrorId: string;
-		postId: string;
-		streamId: string;
-		done?: boolean;
-	};
-}
+// export interface CSGrokStream {
+// 	sequence?: number;
+// 	content?: {
+// 		content: string;
+// 		role: string;
+// 	};
+// 	extra: {
+// 		topmostPostId: string;
+// 		codeErrorId: string;
+// 		postId: string;
+// 		streamId: string;
+// 		done?: boolean;
+// 	};
+// }
 
 export interface PostsChangedNotification {
 	type: ChangeDataType.Posts;
@@ -163,15 +164,15 @@ export interface CodeErrorsChangedNotification {
 	data: CSCodeError[];
 }
 
-export interface GrokExceptionChangedNotification {
-	type: ChangeDataType.AsyncError;
-	data: CSAsyncError[];
-}
+// export interface GrokExceptionChangedNotification {
+// 	type: ChangeDataType.AsyncError;
+// 	data: CSAsyncError[];
+// }
 
-export interface GrokStreamChangedNotification {
-	type: ChangeDataType.GrokStream;
-	data: CSGrokStream[];
-}
+// export interface GrokStreamChangedNotification {
+// 	type: ChangeDataType.GrokStream;
+// 	data: CSGrokStream[];
+// }
 
 export interface StreamsChangedNotification {
 	type: ChangeDataType.Streams;
@@ -181,20 +182,6 @@ export interface StreamsChangedNotification {
 export interface TeamsChangedNotification {
 	type: ChangeDataType.Teams;
 	data: CSTeam[];
-}
-
-export interface Unreads {
-	lastReads: CSLastReads;
-	lastReadItems: CSLastReadItems;
-	mentions: { [streamId: string]: number };
-	unreads: { [streamId: string]: number };
-	totalMentions: number;
-	totalUnreads: number;
-}
-
-export interface UnreadsChangedNotification {
-	type: ChangeDataType.Unreads;
-	data: Unreads;
 }
 
 export interface PreferencesChangedNotification {
@@ -252,14 +239,13 @@ export type DidChangeDataNotification =
 	| CodeErrorsChangedNotification
 	| StreamsChangedNotification
 	| TeamsChangedNotification
-	| UnreadsChangedNotification
 	| UsersChangedNotification
 	| ProvidersChangedNotification
 	| ApiCapabilitiesChangedNotification
 	| CommitsChangedNotification
-	| WorkspaceChangedNotification
-	| GrokExceptionChangedNotification
-	| GrokStreamChangedNotification;
+	| WorkspaceChangedNotification;
+	// | GrokExceptionChangedNotification
+	// | GrokStreamChangedNotification;
 
 export const DidChangeDataNotificationType = new NotificationType<DidChangeDataNotification, void>(
 	"codestream/didChangeData"
@@ -352,10 +338,6 @@ export const DidFailLoginNotificationType = new NotificationType<void, void>(
 	"codestream/didFailLogin"
 );
 
-export const DidEncounterInvalidRefreshTokenNotificationType = new NotificationType<void, void>(
-	"codestream/didEncounterInvalidRefreshToken"
-);
-
 export const DidStartLoginCodeGenerationNotificationType = new NotificationType<void, void>(
 	"codestream/didStartLoginCodeGeneration"
 );
@@ -403,6 +385,20 @@ export const DidRefreshAccessTokenNotificationType = new NotificationType<
 	DidRefreshAccessTokenNotification,
 	void
 >("codestream/didRefreshAccessToken");
+
+export enum SessionTokenStatus {
+	Active = "active",
+	Expired = "expired",
+}
+
+export interface DidChangeSessionTokenStatusNotification {
+	status: SessionTokenStatus;
+}
+
+export const DidChangeSessionTokenStatusNotificationType = new NotificationType<
+	DidChangeSessionTokenStatusNotification,
+	void
+>("codestream/didChangeSessionTokenStatus");
 
 export const AgentInitializedNotificationType = new NotificationType<void, void>(
 	"codestream/agentInitialized"
@@ -473,3 +469,10 @@ export const ConfigChangeReloadNotificationType = new NotificationType<
 	ConfigChangeReloadRequest,
 	void
 >("codestream/configChangeReload");
+
+export interface WhatsNewNotification {
+	title: string;
+}
+export const WhatsNewNotificationType = new NotificationType<WhatsNewNotification, void>(
+	"codestream/whatsNew"
+);

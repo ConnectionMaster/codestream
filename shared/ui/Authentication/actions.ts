@@ -13,12 +13,16 @@ import {
 	TokenLoginRequestType,
 	UpdateNewRelicOrgIdRequestType,
 } from "@codestream/protocols/agent";
-import { CodemarkType, LoginResult } from "@codestream/protocols/api";
+import { CodemarkType, LoginResult, WebviewPanels } from "@codestream/protocols/api";
 import { LogoutRequestType } from "@codestream/protocols/webview";
 import { setBootstrapped } from "@codestream/webview/store/bootstrapped/actions";
 import { withExponentialConnectionRetry } from "@codestream/webview/store/common";
-import { reset } from "@codestream/webview/store/session/actions";
-import { BootstrapInHostRequestType, OpenUrlRequestType } from "../ipc/host.protocol";
+import { reset, setMaintenanceMode, setSession } from "@codestream/webview/store/session/actions";
+import {
+	BootstrapInHostRequestType,
+	OpenUrlRequestType,
+	UpdateServerUrlRequestType,
+} from "../ipc/host.protocol";
 import { GetActiveEditorContextRequestType } from "../ipc/host.protocol.editor";
 import { logError } from "../logger";
 import { CodeStreamState } from "../store";
@@ -36,20 +40,17 @@ import {
 	goToTeamCreation,
 	handlePendingProtocolHandlerUrl,
 	setContext,
-	setCurrentCodeError,
+	setCurrentCodeErrorData,
 	setCurrentCodemark,
 	setCurrentReview,
 	SupportedSSOProvider,
 } from "../store/context/actions";
 import { ChatProviderAccess } from "../store/context/types";
-import { setMaintenanceMode, setSession } from "../store/session/actions";
 import { fetchCodemarks, setUserPreference, setUserPreferences } from "../Stream/actions";
 import { moveCursorToLine } from "../Stream/api-functions";
 import { localStore } from "../utilities/storage";
 import { emptyObject, uuid } from "../utils";
 import { HostApi } from "../webview-api";
-import { WebviewPanels } from "@codestream/protocols/api";
-import { UpdateServerUrlRequestType } from "../ipc/host.protocol";
 export enum SignupType {
 	JoinTeam = "joinTeam",
 	CreateTeam = "createTeam",
@@ -257,9 +258,12 @@ export const authenticate =
 					throw response.error;
 			}
 		}
-		api.track("codestream/user signed_in", {
+		api.track("codestream/user/login succeeded", {
 			meta_data: `source: ${context.pendingProtocolHandlerQuery?.src}`,
 			event_type: "response",
+			platform: "codestream",
+			path: "N/A (codestream)",
+			section: "N/A (codestream)",
 		});
 
 		return dispatch(onLogin(response));
@@ -346,7 +350,7 @@ export const onLogin =
 		} else if (response.state.reviewId) {
 			dispatch(setCurrentReview(response.state.reviewId));
 		} else if (response.state.codeErrorId) {
-			dispatch(setCurrentCodeError(response.state.codeErrorId));
+			dispatch(setCurrentCodeErrorData(response.state.codeErrorId));
 		}
 
 		if (context.pendingProtocolHandlerUrl && !teamCreated) {
@@ -588,6 +592,9 @@ export const validateSignup =
 				meta_data_4: `openinide_flow: false`,
 				meta_data: `source: ${context.pendingProtocolHandlerQuery?.src}`,
 				event_type: "response",
+				platform: "codestream",
+				path: "N/A (codestream)",
+				section: "N/A (codestream)",
 			} as TelemetryData;
 			if (signupStatus === "teamCreated") {
 				trackingInfo["meta_data_2"] = `org_created: true`;
@@ -596,7 +603,7 @@ export const validateSignup =
 			if (signupStatus === "userCreated") trackingInfo["meta_data_3"] = `user_created: true`;
 			if (!_isEmpty(context.pendingProtocolHandlerUrl))
 				trackingInfo["meta_data_4"] = `openinide_flow: true`;
-			HostApi.instance.track("codestream/user signed_in", trackingInfo);
+			HostApi.instance.track("codestream/user/login succeeded", trackingInfo);
 			if (localStore.get("enablingRealTime") === true) {
 				localStore.delete("enablingRealTime");
 				// HostApi.instance.track("Slack Chat Enabled");

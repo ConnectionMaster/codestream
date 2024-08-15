@@ -1,8 +1,7 @@
-import { Container, SessionContainer } from "../../container";
+import { SessionContainer } from "../../container";
 import {
 	Comparison,
 	DetectionMethod,
-	DidDetectObservabilityAnomaliesNotificationType,
 	EntityAccount,
 	GetObservabilityAnomaliesRequest,
 	GetObservabilityAnomaliesResponse,
@@ -11,16 +10,14 @@ import {
 	ObservabilityAnomaly,
 	ObservabilityRepo,
 	SpanWithCodeAttrs,
-	TelemetryData,
 } from "@codestream/protocols/agent";
 import { Logger } from "../../logger";
 import { getStorage } from "../../storage";
 import { getAnomalyDetectionMockResponse } from "./anomalyDetectionMockResults";
 import { getLanguageSupport, LanguageSupport } from "./clm/languageSupport";
-import { flatten } from "lodash";
 import { DeploymentsProvider } from "./deployments/deploymentsProvider";
 import { parseId } from "./utils";
-import { NewRelicGraphqlClient } from "./newRelicGraphqlClient";
+import { NewRelicGraphqlClient, escapeNrql } from "./newRelicGraphqlClient";
 import { ReposProvider } from "./repos/reposProvider";
 
 export class AnomalyDetectorDrillDown {
@@ -51,12 +48,19 @@ export class AnomalyDetectorDrillDown {
 	private _releaseBased = false;
 
 	async execute(): Promise<GetObservabilityAnomaliesResponse> {
-		const mockResponse = getAnomalyDetectionMockResponse(this._request);
+		const mockResponse = getAnomalyDetectionMockResponse(this._request.entityGuid);
 		if (mockResponse) {
 			await this.notifyNewAnomalies(mockResponse.responseTime, mockResponse.errorRate, true);
 			return mockResponse;
 		}
+		return {
+			responseTime: [],
+			errorRate: [],
+			didNotifyNewAnomalies: false,
+		};
+	}
 
+	async _execute(): Promise<GetObservabilityAnomaliesResponse | undefined> {
 		const entityAccount = await this.getEntityAccount();
 		const languageSupport = entityAccount && (await getLanguageSupport(entityAccount));
 		if (!languageSupport) {
@@ -137,33 +141,6 @@ export class AnomalyDetectorDrillDown {
 		// 	durationAnomalies.push(...scoped.durationAnomalies);
 		// }
 
-		try {
-			const telemetry = Container.instance().telemetry;
-			const children = [
-				...flatten(durationAnomalies.map(_ => _.children || [])),
-				...flatten(errorRateAnomalies.map(_ => _.children || [])),
-			];
-			const durationMetrics = children.filter(_ => _.type === "duration");
-			const errorRateMetrics = children.filter(_ => _.type === "duration");
-
-			const event: TelemetryData = {
-				entity_guid: this._request.entityGuid,
-				account_id: this._accountId,
-				meta_data: `language: ${languageSupport.language ?? "<unknown>"}`,
-				meta_data_2: `anomalous_duration_transactions: ${durationAnomalies.length || 0}`,
-				meta_data_3: `anomalous_error_transactions: ${errorRateAnomalies.length || 0}`,
-				meta_data_4: `anomalous_duration_metrics: ${durationMetrics.length || 0}`,
-				meta_data_5: `anomalous_error_metrics: ${errorRateMetrics.length || 0}`,
-				event_type: "state_load",
-			};
-			telemetry?.track({
-				eventName: "codestream/anomalies calculated",
-				properties: event,
-			});
-		} catch (e) {
-			Logger.warn("Error generating anomaly detection telemetry", e);
-		}
-
 		let didNotifyNewAnomalies = false;
 		if (this._request.notifyNewAnomalies) {
 			try {
@@ -184,6 +161,7 @@ export class AnomalyDetectorDrillDown {
 			isSupported: true,
 		};
 	}
+
 	private async executeCore(
 		languageSupport: LanguageSupport,
 		benchmarkSpans: SpanWithCodeAttrs[],
@@ -208,7 +186,7 @@ export class AnomalyDetectorDrillDown {
 				languageSupport,
 				benchmarkSpans,
 				scope,
-				this._request.minimumErrorRate,
+				this._request.minimumErrorPercentage,
 				this._request.minimumSampleRate,
 				this._request.minimumRatio
 			);
@@ -275,7 +253,7 @@ export class AnomalyDetectorDrillDown {
 		minimumSampleRate: number,
 		minimumRatio: number
 	): Promise<{ comparisons: Comparison[]; metricTimesliceNames: string[] }> {
-		const metricFilter = this.getMetricFilter(languageSupport, scope);
+		const metricFilter = this.getMetricFilter(scope);
 		const data = await this.getDurationMetric(this._dataTimeFrame, metricFilter);
 		const dataFiltered = languageSupport.filterMetrics(data, benchmarkSpans);
 
@@ -313,7 +291,7 @@ export class AnomalyDetectorDrillDown {
 		comparisons: Comparison[];
 		metricTimesliceNames: string[];
 	}> {
-		const metricFilter = this.getMetricFilter(languageSupport, scope);
+		const metricFilter = this.getMetricFilter(scope);
 		const errorCountLookup = `metricTimesliceName LIKE 'Errors/%'`;
 		const dataErrorCount = await this.getErrorCountMetric(errorCountLookup, this._dataTimeFrame);
 		const dataErrorCountFiltered = languageSupport.filterMetrics(dataErrorCount, benchmarkSpans);
@@ -561,9 +539,9 @@ export class AnomalyDetectorDrillDown {
 		return this.runNrql<NameValue>(query);
 	}
 
-	private getMetricFilter(languageSupport: LanguageSupport, scope: string | undefined) {
+	getMetricFilter(scope: string | undefined) {
 		if (scope) {
-			return `scope = '${scope}'`;
+			return `scope = '${escapeNrql(scope)}'`;
 		} else {
 			return "metricTimesliceName LIKE 'WebTransaction/%' OR metricTimesliceName LIKE 'OtherTransaction/%'";
 		}
@@ -652,32 +630,33 @@ export class AnomalyDetectorDrillDown {
 			anomaly.notificationText = "Errors (per minute) " + text;
 			anomaly.entityName = entityAccount?.entityName || "";
 		}
-		for (const anomaly of durationAnomalies) {
-			const counterpart = errorRateAnomalies.find(
-				_ =>
-					_.codeAttrs?.codeNamespace === anomaly.codeAttrs?.codeNamespace &&
-					_.codeAttrs?.codeFunction === anomaly.codeAttrs?.codeFunction
-			);
-			if (counterpart) {
-				anomaly.chartHeaderTexts = {
-					...anomaly.chartHeaderTexts,
-					...counterpart.chartHeaderTexts,
-				};
-			}
-		}
-		for (const anomaly of errorRateAnomalies) {
-			const counterpart = durationAnomalies.find(
-				_ =>
-					_.codeAttrs?.codeNamespace === anomaly.codeAttrs?.codeNamespace &&
-					_.codeAttrs?.codeFunction === anomaly.codeAttrs?.codeFunction
-			);
-			if (counterpart) {
-				anomaly.chartHeaderTexts = {
-					...anomaly.chartHeaderTexts,
-					...counterpart.chartHeaderTexts,
-				};
-			}
-		}
+		// FIXME can't be used, many unrelated metrics coalesce to the same code attrs. eg prepared statements
+		// for (const anomaly of durationAnomalies) {
+		// 	const counterpart = errorRateAnomalies.find(
+		// 		_ =>
+		// 			_.codeAttrs?.codeNamespace === anomaly.codeAttrs?.codeNamespace &&
+		// 			_.codeAttrs?.codeFunction === anomaly.codeAttrs?.codeFunction
+		// 	);
+		// 	if (counterpart) {
+		// 		anomaly.chartHeaderTexts = {
+		// 			...anomaly.chartHeaderTexts,
+		// 			...counterpart.chartHeaderTexts,
+		// 		};
+		// 	}
+		// }
+		// for (const anomaly of errorRateAnomalies) {
+		// 	const counterpart = durationAnomalies.find(
+		// 		_ =>
+		// 			_.codeAttrs?.codeNamespace === anomaly.codeAttrs?.codeNamespace &&
+		// 			_.codeAttrs?.codeFunction === anomaly.codeAttrs?.codeFunction
+		// 	);
+		// 	if (counterpart) {
+		// 		anomaly.chartHeaderTexts = {
+		// 			...anomaly.chartHeaderTexts,
+		// 			...counterpart.chartHeaderTexts,
+		// 		};
+		// 	}
+		// }
 	}
 
 	private _observabilityRepo: ObservabilityRepo | undefined;
@@ -763,11 +742,11 @@ export class AnomalyDetectorDrillDown {
 		await storage.flush();
 
 		if (newDurationAnomalies.length || newErrorRateAnomalies.length) {
-			Container.instance().agent.sendNotification(DidDetectObservabilityAnomaliesNotificationType, {
-				entityGuid: entityGuid,
-				duration: newDurationAnomalies,
-				errorRate: newErrorRateAnomalies,
-			});
+			// Container.instance().agent.sendNotification(DidDetectObservabilityAnomaliesNotificationType, {
+			// 	entityGuid: entityGuid,
+			// 	duration: newDurationAnomalies,
+			// 	errorRate: newErrorRateAnomalies,
+			// });
 			return true;
 		}
 

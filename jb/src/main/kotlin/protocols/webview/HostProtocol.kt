@@ -104,6 +104,13 @@ class EditorReplaceSymbolResponse(
     val success: Boolean
 )
 
+class EditorOpenNotification(
+    val title: String,
+    val panel: String,
+    val hash: String?,
+    val entityGuid: String?
+)
+
 class EditorRangeHighlightRequest(
     val uri: String?,
     val range: Range?,
@@ -139,6 +146,10 @@ class EditorScrollToRequest(
 )
 
 class EditorsCodelensRefreshResponse(
+    val success: Boolean
+)
+
+class OpenErrorGroupResponse(
     val success: Boolean
 )
 
@@ -212,4 +223,9 @@ class CompareLocalFilesRequest(
     val baseSha: String,
     val baseBranch: String,
     val context: CodeStreamDiffUriContext?
+)
+
+class BufferOpenRequest(
+    val contentType: String,
+    val data: String
 )
